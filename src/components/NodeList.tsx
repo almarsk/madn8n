@@ -14,6 +14,7 @@ export default function NodeList({ modules, onNodeDragStart, onSidebarNodeClick 
           onDragStart={onNodeDragStart(t.name)}
           onClick={() => onSidebarNodeClick(t.name)}
           draggable
+          style={t.name === 'Branching' ? { fontWeight: '600', borderColor: 'rgba(96, 165, 250, 0.6)' } : {}}
         >
           {t.name}
         </div>

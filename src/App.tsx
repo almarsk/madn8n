@@ -5,6 +5,8 @@ import modules from './modules'
 import Toolbar from './components/Toolbar'
 import FlowCanvas from './components/FlowCanvas'
 import Minimap from './Minimap'
+import NodePopupMenu from './components/NodePopupMenu'
+import BranchingNodeMenu from './components/BranchingNodeMenu'
 import { useConnectionHandlers } from './hooks/useConnectionHandlers'
 
 const initialNodes: Node[] = []
@@ -19,9 +21,9 @@ function App() {
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const [isLocked, setIsLocked] = useState(false)
-  const [debugLogging, setDebugLogging] = useState(false)
   const [showMinimap, setShowMinimap] = useState(false)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
+  const [openMenuNodeId, setOpenMenuNodeId] = useState<string | null>(null)
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
@@ -30,7 +32,6 @@ function App() {
     edges,
     setEdges,
     setNodes,
-    debugLogging,
   })
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -57,20 +58,78 @@ function App() {
       })
 
       const module = modules.find((m) => m.name === type)
-      const newNode: Node = {
-        id: getId(),
-        type: 'dynamic',
-        position,
-        data: {
-          label: module?.name ?? type,
-          connectingFrom: null,
-          debugLogging: debugLogging,
-        },
-      }
+      if (module?.name === 'Branching') {
+        // Create branching node with initial output count of 1
+        const branchingNodeId = getId()
+        const outputNodeWidth = 130
+        const outputNodeHeight = 60
+        const padding = 20
+        // Header height: padding (12px top + 12px bottom) + text (~20px) = ~44px, use 50px
+        const headerHeight = 50
+        const outputSpacing = 10
+        const outputCount = 1
 
-      setNodes((nds) => nds.concat(newNode))
+        // Calculate branching node size based on output count
+        // Header at top, then output nodes below with spacing
+        const branchingNodeWidth = outputNodeWidth + padding * 2
+        const branchingNodeHeight = headerHeight + (outputCount * (outputNodeHeight + outputSpacing)) + padding
+
+        const branchingNode: Node = {
+          id: branchingNodeId,
+          type: 'branching',
+          position,
+          data: {
+            label: 'Branching Node',
+            outputCount: 1,
+            connectingFrom: null,
+          },
+          style: {
+            width: branchingNodeWidth,
+            height: branchingNodeHeight,
+          },
+          zIndex: 1, // Branching nodes at the bottom layer
+        }
+
+        // Create initial output node positioned inside branching node (below header)
+        const outputNode: Node = {
+          id: getId(),
+          type: 'branchingOutput',
+          position: {
+            x: position.x + padding,
+            y: position.y + headerHeight,
+          },
+          data: {
+            label: 'Output 1',
+            parentNodeId: branchingNodeId,
+            connectingFrom: null,
+          },
+          style: {
+            width: outputNodeWidth,
+            height: outputNodeHeight,
+          },
+          zIndex: 3, // Output nodes at the top layer, above edges and branching nodes
+        }
+
+        setNodes((nds) => nds.concat([branchingNode, outputNode]))
+      } else if (module) {
+        const newNode: Node = {
+          id: getId(),
+          type: 'dynamic',
+          position,
+          data: {
+            label: module?.name ?? type,
+            connectingFrom: null,
+          },
+          style: {
+            width: 150,
+            height: 80,
+          },
+        }
+
+        setNodes((nds) => nds.concat(newNode))
+      }
     },
-    [reactFlowInstance, setNodes, debugLogging]
+    [reactFlowInstance, setNodes]
   )
 
   const onNodeDragStart = (type: string) => (event: React.DragEvent) => {
@@ -92,26 +151,146 @@ function App() {
       const centerX = bounds.width / 2
       const centerY = bounds.height / 2
 
-      const position = reactFlowInstance.screenToFlowPosition({
+      let position = reactFlowInstance.screenToFlowPosition({
         x: centerX,
         y: centerY,
       })
 
-      const module = modules.find((m) => m.name === moduleName)
-      const newNode: Node = {
-        id: getId(),
-        type: 'dynamic',
-        position,
-        data: {
-          label: module?.name ?? moduleName,
-          connectingFrom: null,
-          debugLogging: debugLogging,
-        },
-      }
+      // Check if there's already a node at this position and offset if needed
+      const nodeWidth = 150
+      const nodeHeight = 80
+      const offsetX = 30
+      const offsetY = 30
 
-      setNodes((nds) => nds.concat(newNode))
+      setNodes((nds) => {
+        // Check for overlapping nodes
+        let finalPosition = { ...position }
+        let attempts = 0
+        const maxAttempts = 10
+
+        while (attempts < maxAttempts) {
+          const hasFullOverlap = nds.some((node) => {
+            const nodePos = node.position
+            const nodeStyle = node.style || {}
+            const existingWidth = typeof nodeStyle.width === 'number' ? nodeStyle.width : nodeWidth
+            const existingHeight = typeof nodeStyle.height === 'number' ? nodeStyle.height : nodeHeight
+
+            // Calculate overlap area
+            const overlapLeft = Math.max(nodePos.x, finalPosition.x)
+            const overlapRight = Math.min(nodePos.x + existingWidth, finalPosition.x + nodeWidth)
+            const overlapTop = Math.max(nodePos.y, finalPosition.y)
+            const overlapBottom = Math.min(nodePos.y + existingHeight, finalPosition.y + nodeHeight)
+
+            // If there's no overlap, continue
+            if (overlapRight <= overlapLeft || overlapBottom <= overlapTop) {
+              return false
+            }
+
+            // Calculate overlap area
+            const overlapWidth = overlapRight - overlapLeft
+            const overlapHeight = overlapBottom - overlapTop
+            const overlapArea = overlapWidth * overlapHeight
+
+            // Calculate areas of both nodes
+            const existingArea = existingWidth * existingHeight
+            const newArea = nodeWidth * nodeHeight
+            const smallerArea = Math.min(existingArea, newArea)
+
+            // Check if overlap is too large (more than 80% of the smaller node)
+            // This allows partial overlap but prevents nodes from being fully on top of each other
+            const overlapRatio = overlapArea / smallerArea
+            return overlapRatio > 0.8
+          })
+
+          if (!hasFullOverlap) {
+            break
+          }
+
+          // Offset to the right and down
+          finalPosition = {
+            x: finalPosition.x + offsetX,
+            y: finalPosition.y + offsetY,
+          }
+          attempts++
+        }
+
+        const module = modules.find((m) => m.name === moduleName)
+        if (module?.name === 'Branching') {
+          // Create branching node with initial output count of 1
+          const branchingNodeId = getId()
+          const outputNodeWidth = 130
+          const outputNodeHeight = 60
+          const padding = 20
+          // Header height: padding (12px top + 12px bottom) + text (~20px) = ~44px, use 50px
+          const headerHeight = 50
+          const outputSpacing = 10
+          const outputCount = 1
+
+          // Calculate branching node size based on output count
+          // Header at top, then output nodes below with spacing
+          const branchingNodeWidth = outputNodeWidth + padding * 2
+          const branchingNodeHeight = headerHeight + (outputCount * (outputNodeHeight + outputSpacing)) + padding
+
+          const branchingNode: Node = {
+            id: branchingNodeId,
+            type: 'branching',
+            position: finalPosition,
+            data: {
+              label: 'Branching Node',
+              outputCount: 1,
+              connectingFrom: null,
+            },
+            style: {
+              width: branchingNodeWidth,
+              height: branchingNodeHeight,
+            },
+            zIndex: 1, // Branching nodes at the bottom layer
+          }
+
+          // Create initial output node positioned inside branching node (below header)
+          const outputNode: Node = {
+            id: getId(),
+            type: 'branchingOutput',
+            position: {
+              x: finalPosition.x + padding,
+              y: finalPosition.y + headerHeight,
+            },
+            data: {
+              label: 'Output 1',
+              parentNodeId: branchingNodeId,
+              connectingFrom: null,
+            },
+            style: {
+              width: outputNodeWidth,
+              height: outputNodeHeight,
+            },
+            zIndex: 3, // Output nodes at the top layer, above edges and branching nodes
+          }
+
+          return nds.concat([branchingNode, outputNode])
+        } else if (module) {
+          const newNode: Node = {
+            id: getId(),
+            type: 'dynamic',
+            position: finalPosition,
+            data: {
+              label: module.name,
+              connectingFrom: null,
+            },
+            style: {
+              width: nodeWidth,
+              height: nodeHeight,
+            },
+          }
+
+          return nds.concat(newNode)
+        }
+
+        // Return unchanged if no module found
+        return nds
+      })
     },
-    [reactFlowInstance, setNodes, debugLogging]
+    [reactFlowInstance, setNodes, modules]
   )
 
   const handleZoomIn = () => {
@@ -150,6 +329,235 @@ function App() {
     [onEdgesChange]
   )
 
+  // Wrap onNodesChange to clean up output nodes when branching node is deleted
+  const handleNodesChange = useCallback(
+    (changes: any[]) => {
+      // Check if any branching nodes are being removed or moved
+      const removedBranchingNodeIds = new Set<string>()
+      const movedBranchingNodeIds = new Set<string>()
+
+      changes.forEach((change) => {
+        if (change.type === 'remove') {
+          const node = nodes.find((n) => n.id === change.id)
+          if (node?.type === 'branching') {
+            removedBranchingNodeIds.add(change.id)
+          }
+        } else if (change.type === 'position' && change.position) {
+          const node = nodes.find((n) => n.id === change.id)
+          if (node?.type === 'branching') {
+            movedBranchingNodeIds.add(change.id)
+          }
+        }
+      })
+
+      // If branching nodes are being removed, also remove their output nodes
+      if (removedBranchingNodeIds.size > 0) {
+        setNodes((nds) => {
+          const outputNodesToRemove = nds.filter(
+            (n) => n.type === 'branchingOutput' && n.data.parentNodeId && removedBranchingNodeIds.has(n.data.parentNodeId)
+          )
+          const outputNodeIdsToRemove = new Set(outputNodesToRemove.map((n) => n.id))
+
+          // Also remove edges connected to these output nodes
+          setEdges((eds) => eds.filter((e) => !outputNodeIdsToRemove.has(e.source) && !outputNodeIdsToRemove.has(e.target)))
+
+          return nds.filter((n) => !outputNodeIdsToRemove.has(n.id))
+        })
+      }
+
+      // If branching nodes are being moved, update their output node positions
+      if (movedBranchingNodeIds.size > 0) {
+        setNodes((nds) => {
+          const outputNodeHeight = 60
+          const padding = 20
+          // Header height includes padding (12px top + 12px bottom) + text height (~20px) = ~44px, use 50px for safety
+          const headerHeight = 50
+          const outputSpacing = 10
+
+          return nds.map((node) => {
+            if (node.type === 'branchingOutput' && node.data.parentNodeId && movedBranchingNodeIds.has(node.data.parentNodeId)) {
+              const branchingNode = nds.find((n) => n.id === node.data.parentNodeId && n.type === 'branching')
+              if (branchingNode) {
+                const outputNodes = nds.filter(
+                  (n) => n.type === 'branchingOutput' && n.data.parentNodeId === branchingNode.id
+                )
+                const index = outputNodes.findIndex((n) => n.id === node.id)
+                if (index >= 0) {
+                  const branchingPos = branchingNode.position || { x: 0, y: 0 }
+                  return {
+                    ...node,
+                    position: {
+                      x: branchingPos.x + padding,
+                      y: branchingPos.y + headerHeight + index * (outputNodeHeight + outputSpacing),
+                    },
+                  }
+                }
+              }
+            }
+            return node
+          })
+        })
+      }
+
+      onNodesChange(changes)
+    },
+    [nodes, onNodesChange, setNodes, setEdges]
+  )
+
+  const handleLabelClick = useCallback((nodeId: string) => {
+    setOpenMenuNodeId(nodeId)
+  }, [])
+
+  const handleCloseMenu = useCallback(() => {
+    setOpenMenuNodeId(null)
+  }, [])
+
+  const handleOutputCountChange = useCallback((nodeId: string, count: number) => {
+    setNodes((nds) => {
+      // Update the branching node's output count
+      const updatedNodes = nds.map((node) => {
+        if (node.id === nodeId && node.type === 'branching') {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              outputCount: count,
+            },
+          }
+        }
+        return node
+      })
+
+      // Find the branching node
+      const branchingNode = updatedNodes.find((n) => n.id === nodeId && n.type === 'branching')
+      if (!branchingNode) return updatedNodes
+
+      // Get existing output nodes for this branching node
+      const existingOutputNodes = updatedNodes.filter(
+        (n) => n.type === 'branchingOutput' && n.data.parentNodeId === nodeId
+      )
+
+      const currentCount = existingOutputNodes.length
+      const newCount = count
+
+      // Constants for output node layout
+      const outputNodeWidth = 130
+      const outputNodeHeight = 60
+      const padding = 20
+      // Header height includes padding (12px top + 12px bottom) + text height (~20px) = ~44px, use 50px for safety
+      const headerHeight = 50
+      const outputSpacing = 10
+
+      // Update branching node size based on new output count
+      // Header at top, then output nodes below with spacing
+      const branchingNodeWidth = outputNodeWidth + padding * 2
+      const branchingNodeHeight = headerHeight + (newCount * (outputNodeHeight + outputSpacing)) + padding
+
+      const updatedBranchingNode = {
+        ...branchingNode,
+        style: {
+          ...branchingNode.style,
+          width: branchingNodeWidth,
+          height: branchingNodeHeight,
+        },
+      }
+
+      const nodesWithUpdatedBranching = updatedNodes.map((node) =>
+        node.id === nodeId ? updatedBranchingNode : node
+      )
+
+      if (newCount > currentCount) {
+        // Add new output nodes positioned inside branching node
+        const nodesToAdd: Node[] = []
+        const branchingPos = branchingNode.position || { x: 0, y: 0 }
+
+        for (let i = currentCount; i < newCount; i++) {
+          const outputNode: Node = {
+            id: getId(),
+            type: 'branchingOutput',
+            position: {
+              x: branchingPos.x + padding,
+              y: branchingPos.y + headerHeight + i * (outputNodeHeight + outputSpacing),
+            },
+            data: {
+              label: `Output ${i + 1}`,
+              parentNodeId: nodeId,
+              connectingFrom: null,
+            },
+            style: {
+              width: outputNodeWidth,
+              height: outputNodeHeight,
+            },
+            zIndex: 3, // Output nodes at the top layer, above edges and branching nodes
+          }
+          nodesToAdd.push(outputNode)
+        }
+        return [...nodesWithUpdatedBranching, ...nodesToAdd]
+      } else if (newCount < currentCount) {
+        // Remove excess output nodes
+        const nodesToRemove = existingOutputNodes.slice(newCount)
+        const nodeIdsToRemove = new Set(nodesToRemove.map((n) => n.id))
+
+        // Also remove edges connected to these nodes
+        setEdges((eds) => eds.filter((e) => !nodeIdsToRemove.has(e.source) && !nodeIdsToRemove.has(e.target)))
+
+        // Update remaining output nodes positions and branching node size
+        const remainingOutputNodes = existingOutputNodes.slice(0, newCount)
+        const branchingPos = branchingNode.position || { x: 0, y: 0 }
+
+        const nodesWithRepositionedOutputs = nodesWithUpdatedBranching.map((node) => {
+          if (node.type === 'branchingOutput' && node.data.parentNodeId === nodeId) {
+            const index = remainingOutputNodes.findIndex((n) => n.id === node.id)
+            if (index >= 0) {
+              return {
+                ...node,
+                position: {
+                  x: branchingPos.x + padding,
+                  y: branchingPos.y + headerHeight + index * (outputNodeHeight + outputSpacing),
+                },
+              }
+            }
+          }
+          return node
+        })
+
+        return nodesWithRepositionedOutputs.filter((n) => !nodeIdsToRemove.has(n.id))
+      }
+
+      // Update output node positions even if count didn't change (in case branching node moved)
+      const branchingPos = branchingNode.position || { x: 0, y: 0 }
+      const nodesWithRepositionedOutputs = nodesWithUpdatedBranching.map((node) => {
+        if (node.type === 'branchingOutput' && node.data.parentNodeId === nodeId) {
+          const index = existingOutputNodes.findIndex((n) => n.id === node.id)
+          if (index >= 0) {
+            return {
+              ...node,
+              position: {
+                x: branchingPos.x + padding,
+                y: branchingPos.y + headerHeight + index * (outputNodeHeight + outputSpacing),
+              },
+            }
+          }
+        }
+        return node
+      })
+
+      return nodesWithRepositionedOutputs
+    })
+  }, [setNodes, setEdges])
+
+  // Update nodes with label click handler, make output nodes non-draggable, and set zIndex for proper layering
+  // zIndex: branching nodes (1) < edges (2) < output nodes (3) < menu (1000 via CSS)
+  const nodesWithHandlers = nodes.map((node) => ({
+    ...node,
+    data: {
+      ...node.data,
+      onLabelClick: handleLabelClick,
+    },
+    draggable: node.type !== 'branchingOutput', // Output nodes are not draggable - they move with parent
+    zIndex: node.type === 'branchingOutput' ? 3 : node.type === 'branching' ? 1 : 2, // Output nodes on top, branching nodes on bottom
+  }))
+
   return (
     <div className="app-root">
       <main className="canvas-wrapper" ref={reactFlowWrapper}>
@@ -162,16 +570,17 @@ function App() {
           onFitView={handleFitView}
           isLocked={isLocked}
           onLockToggle={() => setIsLocked((prev) => !prev)}
-          debugLogging={debugLogging}
-          onDebugToggle={() => setDebugLogging((prev) => !prev)}
           showMinimap={showMinimap}
           onMinimapToggle={() => setShowMinimap((prev) => !prev)}
         />
 
         <FlowCanvas
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
+          nodes={nodesWithHandlers}
+          edges={edges.map((edge) => ({
+            ...edge,
+            zIndex: edge.zIndex ?? 2, // Edges above branching nodes (1) but below output nodes (3)
+          }))}
+          onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
           onConnectStart={onConnectStart}
@@ -183,6 +592,41 @@ function App() {
           onMove={onMove}
           isLocked={isLocked}
         />
+
+        {openMenuNodeId && reactFlowInstance && (() => {
+          const menuNode = nodes.find((n) => n.id === openMenuNodeId)
+          if (!menuNode) return null
+
+          if (menuNode.type === 'branching') {
+            return (
+              <BranchingNodeMenu
+                node={menuNode}
+                onClose={handleCloseMenu}
+                reactFlowWrapper={reactFlowWrapper}
+                reactFlowInstance={reactFlowInstance}
+                onOutputCountChange={handleOutputCountChange}
+              />
+            )
+          } else if (menuNode.type === 'branchingOutput') {
+            return (
+              <NodePopupMenu
+                node={menuNode}
+                onClose={handleCloseMenu}
+                reactFlowWrapper={reactFlowWrapper}
+                reactFlowInstance={reactFlowInstance}
+              />
+            )
+          } else {
+            return (
+              <NodePopupMenu
+                node={menuNode}
+                onClose={handleCloseMenu}
+                reactFlowWrapper={reactFlowWrapper}
+                reactFlowInstance={reactFlowInstance}
+              />
+            )
+          }
+        })()}
 
         {showMinimap && reactFlowInstance && (
           <Minimap

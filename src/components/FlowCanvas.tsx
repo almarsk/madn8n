@@ -9,6 +9,8 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import DynamicNode from '../DynamicNode'
+import BranchingNode from '../BranchingNode'
+import BranchingNodeOutput from '../BranchingNodeOutput'
 
 interface FlowCanvasProps {
   nodes: Node[]
@@ -44,6 +46,8 @@ export default function FlowCanvas({
   const nodeTypes = useMemo(
     () => ({
       dynamic: DynamicNode,
+      branching: BranchingNode,
+      branchingOutput: BranchingNodeOutput,
     }),
     []
   )
@@ -70,6 +74,8 @@ export default function FlowCanvas({
       minZoom={0.02}
       fitView
       proOptions={{ hideAttribution: true }}
+      elevateNodesOnSelect={false}
+      elevateEdgesOnSelect={false}
     >
       <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#94a3b8" />
     </ReactFlow>

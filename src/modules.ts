@@ -6,6 +6,11 @@ export interface Module {
 
 const modules: Module[] = [
     {
+        "name": "Branching",
+        "description": "Branching node that contains output nodes",
+        "params": {}
+    },
+    {
         "name": "Type 1",
         "description": "Module 1 description",
         "params": {

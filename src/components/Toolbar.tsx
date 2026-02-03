@@ -1,6 +1,5 @@
-import { useState, useRef, type MouseEvent as ReactMouseEvent } from 'react'
+import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import NodeList from './NodeList'
-import './Toolbar.css'
 
 interface ToolbarProps {
   modules: Array<{ name: string; description: string; params: Record<string, string> }>
@@ -11,8 +10,6 @@ interface ToolbarProps {
   onFitView: () => void
   isLocked: boolean
   onLockToggle: () => void
-  debugLogging: boolean
-  onDebugToggle: () => void
   showMinimap: boolean
   onMinimapToggle: () => void
 }
@@ -26,14 +23,15 @@ export default function Toolbar({
   onFitView,
   isLocked,
   onLockToggle,
-  debugLogging,
-  onDebugToggle,
   showMinimap,
   onMinimapToggle,
 }: ToolbarProps) {
   const [toolbarPosition, setToolbarPosition] = useState({ x: 16, y: 16 })
   const [toolbarSize, setToolbarSize] = useState({ width: 280, height: 260 })
   const [isToolbarMinimized, setIsToolbarMinimized] = useState(false)
+
+  // Fixed width based on button bar - buttons will wrap to new lines
+  const TOOLBAR_FIXED_WIDTH = 280
 
   const onToolbarMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -62,42 +60,19 @@ export default function Toolbar({
     event.preventDefault()
     event.stopPropagation()
 
-    const startX = event.clientX
     const startY = event.clientY
-    const { width, height } = toolbarSize
-
-    let rafId: number | null = null
-    let pendingUpdate: { width: number; height: number } | null = null
-
-    const applyUpdate = () => {
-      if (pendingUpdate) {
-        setToolbarSize(pendingUpdate)
-        pendingUpdate = null
-      }
-      rafId = null
-    }
+    const { height } = toolbarSize
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = moveEvent.clientX - startX
       const deltaY = moveEvent.clientY - startY
 
-      const nextWidth = Math.max(80, width + deltaX)
       const nextHeight = Math.max(160, height + deltaY)
 
-      pendingUpdate = { width: nextWidth, height: nextHeight }
-
-      if (!rafId) {
-        rafId = requestAnimationFrame(applyUpdate)
-      }
+      // Only allow vertical resizing, width is fixed
+      setToolbarSize({ width: TOOLBAR_FIXED_WIDTH, height: nextHeight })
     }
 
     const handleMouseUp = () => {
-      if (rafId) {
-        cancelAnimationFrame(rafId)
-      }
-      if (pendingUpdate) {
-        setToolbarSize(pendingUpdate)
-      }
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
@@ -111,7 +86,7 @@ export default function Toolbar({
       className={`nodes-toolbar ${isToolbarMinimized ? 'nodes-toolbar--minimized' : ''}`}
       style={{
         transform: `translate(${toolbarPosition.x}px, ${toolbarPosition.y}px)`,
-        width: toolbarSize.width,
+        width: TOOLBAR_FIXED_WIDTH,
         height: isToolbarMinimized ? 'auto' : toolbarSize.height,
       }}
     >
@@ -164,14 +139,6 @@ export default function Toolbar({
                 title={isLocked ? 'Unlock canvas interactions' : 'Lock canvas interactions'}
               >
                 {isLocked ? '🔒' : '🔓'}
-              </button>
-              <button
-                type="button"
-                className={`toolbar-nav-button ${debugLogging ? 'toolbar-lock-button--active' : ''}`}
-                onClick={onDebugToggle}
-                title={debugLogging ? 'Disable debug logging' : 'Enable debug logging'}
-              >
-                🐛
               </button>
               <button
                 type="button"

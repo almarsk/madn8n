@@ -5,14 +5,17 @@ interface UseConnectionHandlersProps {
   edges: Edge[]
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>
   setNodes: React.Dispatch<React.SetStateAction<any[]>>
-  debugLogging?: boolean
+}
+
+export interface ConnectionState {
+  connectingFrom: string | null
+  attemptingFromBlockedNode: string | null
 }
 
 export function useConnectionHandlers({
   edges,
   setEdges,
   setNodes,
-  debugLogging = false,
 }: UseConnectionHandlersProps) {
   const isValidConnection = useCallback(
     (connection: Connection) => {
@@ -49,12 +52,6 @@ export function useConnectionHandlers({
   const onConnectStart = useCallback(
     (_event: React.MouseEvent | React.TouchEvent, { nodeId, handleId }: { nodeId: string | null; handleId: string | null }) => {
       if (nodeId && handleId && handleId.includes('-source')) {
-        // Check if this node already has an output
-        const sourceNodeHasOutput = edges.some((edge) => edge.source === nodeId)
-        if (sourceNodeHasOutput) {
-          return
-        }
-
         // Update all nodes to know which one is connecting
         setNodes((nds) =>
           nds.map((node) => ({
@@ -62,13 +59,12 @@ export function useConnectionHandlers({
             data: {
               ...node.data,
               connectingFrom: nodeId,
-              debugLogging: debugLogging,
             },
           }))
         )
       }
     },
-    [setNodes, edges, debugLogging]
+    [setNodes]
   )
 
   const onConnectEnd = useCallback(
@@ -80,28 +76,21 @@ export function useConnectionHandlers({
           data: {
             ...node.data,
             connectingFrom: null,
-            debugLogging: debugLogging,
           },
         }))
       )
     },
-    [setNodes, debugLogging]
+    [setNodes]
   )
 
   const onConnect = useCallback(
     (params: Edge | Connection) => {
       // Validate handle types only if they are provided
       if (params.sourceHandle && !params.sourceHandle.includes('-source')) {
-        if (debugLogging) {
-          console.error('Invalid source handle:', params.sourceHandle)
-        }
         return
       }
 
       if (params.targetHandle && !params.targetHandle.includes('-target')) {
-        if (debugLogging) {
-          console.error('Invalid target handle:', params.targetHandle)
-        }
         return
       }
 
@@ -124,6 +113,7 @@ export function useConnectionHandlers({
         // Create new edge with arrow at the end
         const newEdge = {
           ...params,
+          zIndex: 2, // Edges above branching nodes (1) but below output nodes (3)
           markerEnd: {
             type: MarkerType.ArrowClosed,
             width: 20,
@@ -150,7 +140,7 @@ export function useConnectionHandlers({
         }))
       )
     },
-    [setEdges, setNodes, debugLogging]
+    [setEdges, setNodes]
   )
 
   return {
