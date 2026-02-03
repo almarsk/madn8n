@@ -111,9 +111,10 @@ export function useConnectionHandlers({
         }
 
         // Create new edge with arrow at the end
+        // Arrow marker will be positioned at the handle, CSS will adjust for better visual connection
         const newEdge = {
           ...params,
-          zIndex: 2, // Edges above branching nodes (1) but below output nodes (3)
+          zIndex: 2, // Edges above branching nodes (1) but same as other nodes
           markerEnd: {
             type: MarkerType.ArrowClosed,
             width: 20,

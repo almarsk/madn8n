@@ -6,7 +6,6 @@ import Toolbar from './components/Toolbar'
 import FlowCanvas from './components/FlowCanvas'
 import Minimap from './Minimap'
 import NodePopupMenu from './components/NodePopupMenu'
-import BranchingNodeMenu from './components/BranchingNodeMenu'
 import { useConnectionHandlers } from './hooks/useConnectionHandlers'
 
 const initialNodes: Node[] = []
@@ -70,9 +69,9 @@ function App() {
         const outputCount = 1
 
         // Calculate branching node size based on output count
-        // Header at top, then output nodes below with spacing
+        // Header at top, then consistent spacing between header and outputs, and between outputs
         const branchingNodeWidth = outputNodeWidth + padding * 2
-        const branchingNodeHeight = headerHeight + (outputCount * (outputNodeHeight + outputSpacing)) + padding
+        const branchingNodeHeight = headerHeight + outputSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding
 
         const branchingNode: Node = {
           id: branchingNodeId,
@@ -90,13 +89,13 @@ function App() {
           zIndex: 1, // Branching nodes at the bottom layer
         }
 
-        // Create initial output node positioned inside branching node (below header)
+        // Create initial output node positioned inside branching node (below header with consistent spacing)
         const outputNode: Node = {
           id: getId(),
           type: 'branchingOutput',
           position: {
             x: position.x + padding,
-            y: position.y + headerHeight,
+            y: position.y + headerHeight + outputSpacing,
           },
           data: {
             label: 'Output 1',
@@ -247,13 +246,13 @@ function App() {
             zIndex: 1, // Branching nodes at the bottom layer
           }
 
-          // Create initial output node positioned inside branching node (below header)
+          // Create initial output node positioned inside branching node (below header with spacing)
           const outputNode: Node = {
             id: getId(),
             type: 'branchingOutput',
             position: {
               x: finalPosition.x + padding,
-              y: finalPosition.y + headerHeight,
+              y: finalPosition.y + headerHeight + outputSpacing,
             },
             data: {
               label: 'Output 1',
@@ -264,7 +263,7 @@ function App() {
               width: outputNodeWidth,
               height: outputNodeHeight,
             },
-            zIndex: 3, // Output nodes at the top layer, above edges and branching nodes
+            zIndex: 2, // Output nodes same as other nodes, but above their parent branching node (1)
           }
 
           return nds.concat([branchingNode, outputNode])
@@ -388,7 +387,7 @@ function App() {
                     ...node,
                     position: {
                       x: branchingPos.x + padding,
-                      y: branchingPos.y + headerHeight + index * (outputNodeHeight + outputSpacing),
+                      y: branchingPos.y + headerHeight + outputSpacing + index * (outputNodeHeight + outputSpacing),
                     },
                   }
                 }
@@ -411,6 +410,15 @@ function App() {
   const handleCloseMenu = useCallback(() => {
     setOpenMenuNodeId(null)
   }, [])
+
+  const handleExportJson = useCallback(() => {
+    if (!reactFlowInstance) {
+      console.warn('ReactFlow instance not available')
+      return
+    }
+    const flowData = reactFlowInstance.toObject()
+    console.log('ReactFlow JSON:', JSON.stringify(flowData, null, 2))
+  }, [reactFlowInstance])
 
   const handleOutputCountChange = useCallback((nodeId: string, count: number) => {
     setNodes((nds) => {
@@ -449,9 +457,9 @@ function App() {
       const outputSpacing = 10
 
       // Update branching node size based on new output count
-      // Header at top, then output nodes below with spacing
+      // Header at top, then consistent spacing between header and outputs, and between outputs
       const branchingNodeWidth = outputNodeWidth + padding * 2
-      const branchingNodeHeight = headerHeight + (newCount * (outputNodeHeight + outputSpacing)) + padding
+      const branchingNodeHeight = headerHeight + outputSpacing + (newCount * outputNodeHeight) + ((newCount - 1) * outputSpacing) + padding
 
       const updatedBranchingNode = {
         ...branchingNode,
@@ -477,7 +485,7 @@ function App() {
             type: 'branchingOutput',
             position: {
               x: branchingPos.x + padding,
-              y: branchingPos.y + headerHeight + i * (outputNodeHeight + outputSpacing),
+              y: branchingPos.y + headerHeight + outputSpacing + i * (outputNodeHeight + outputSpacing),
             },
             data: {
               label: `Output ${i + 1}`,
@@ -488,7 +496,7 @@ function App() {
               width: outputNodeWidth,
               height: outputNodeHeight,
             },
-            zIndex: 3, // Output nodes at the top layer, above edges and branching nodes
+            zIndex: 2, // Output nodes same as other nodes, but above their parent branching node (1)
           }
           nodesToAdd.push(outputNode)
         }
@@ -513,7 +521,7 @@ function App() {
                 ...node,
                 position: {
                   x: branchingPos.x + padding,
-                  y: branchingPos.y + headerHeight + index * (outputNodeHeight + outputSpacing),
+                  y: branchingPos.y + headerHeight + outputSpacing + index * (outputNodeHeight + outputSpacing),
                 },
               }
             }
@@ -534,7 +542,7 @@ function App() {
               ...node,
               position: {
                 x: branchingPos.x + padding,
-                y: branchingPos.y + headerHeight + index * (outputNodeHeight + outputSpacing),
+                y: branchingPos.y + headerHeight + outputSpacing + index * (outputNodeHeight + outputSpacing),
               },
             }
           }
@@ -547,16 +555,27 @@ function App() {
   }, [setNodes, setEdges])
 
   // Update nodes with label click handler, make output nodes non-draggable, and set zIndex for proper layering
-  // zIndex: branching nodes (1) < edges (2) < output nodes (3) < menu (1000 via CSS)
-  const nodesWithHandlers = nodes.map((node) => ({
-    ...node,
-    data: {
-      ...node.data,
-      onLabelClick: handleLabelClick,
-    },
-    draggable: node.type !== 'branchingOutput', // Output nodes are not draggable - they move with parent
-    zIndex: node.type === 'branchingOutput' ? 3 : node.type === 'branching' ? 1 : 2, // Output nodes on top, branching nodes on bottom
-  }))
+  // zIndex: branching nodes (1) < edges (2) < other nodes (2) 
+  // Output nodes should be above their parent branching node but behave normally with other nodes
+  const nodesWithHandlers = nodes.map((node) => {
+    let zIndex = 2 // Default for dynamic nodes
+    if (node.type === 'branching') {
+      zIndex = 1 // Branching nodes at bottom
+    } else if (node.type === 'branchingOutput') {
+      // Output nodes should be above their parent branching node (zIndex 2 > 1)
+      // but same as other nodes, so they behave normally in the z-order
+      zIndex = 2
+    }
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        onLabelClick: handleLabelClick,
+      },
+      draggable: node.type !== 'branchingOutput', // Output nodes are not draggable - they move with parent
+      zIndex,
+    }
+  })
 
   return (
     <div className="app-root">
@@ -572,6 +591,7 @@ function App() {
           onLockToggle={() => setIsLocked((prev) => !prev)}
           showMinimap={showMinimap}
           onMinimapToggle={() => setShowMinimap((prev) => !prev)}
+          onExportJson={handleExportJson}
         />
 
         <FlowCanvas
@@ -597,35 +617,15 @@ function App() {
           const menuNode = nodes.find((n) => n.id === openMenuNodeId)
           if (!menuNode) return null
 
-          if (menuNode.type === 'branching') {
-            return (
-              <BranchingNodeMenu
-                node={menuNode}
-                onClose={handleCloseMenu}
-                reactFlowWrapper={reactFlowWrapper}
-                reactFlowInstance={reactFlowInstance}
-                onOutputCountChange={handleOutputCountChange}
-              />
-            )
-          } else if (menuNode.type === 'branchingOutput') {
-            return (
-              <NodePopupMenu
-                node={menuNode}
-                onClose={handleCloseMenu}
-                reactFlowWrapper={reactFlowWrapper}
-                reactFlowInstance={reactFlowInstance}
-              />
-            )
-          } else {
-            return (
-              <NodePopupMenu
-                node={menuNode}
-                onClose={handleCloseMenu}
-                reactFlowWrapper={reactFlowWrapper}
-                reactFlowInstance={reactFlowInstance}
-              />
-            )
-          }
+          return (
+            <NodePopupMenu
+              node={menuNode}
+              onClose={handleCloseMenu}
+              reactFlowWrapper={reactFlowWrapper}
+              reactFlowInstance={reactFlowInstance}
+              onOutputCountChange={menuNode.type === 'branching' ? handleOutputCountChange : undefined}
+            />
+          )
         })()}
 
         {showMinimap && reactFlowInstance && (

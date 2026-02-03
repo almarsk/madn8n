@@ -43,6 +43,7 @@ function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
                 onClick={handleLabelClick}
             >
                 {data.label}
+                <span className="dynamic-node-label-menu-icon">⋮</span>
             </div>
 
             {/* Target handles - visible when dragging a connection */}

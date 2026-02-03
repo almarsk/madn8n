@@ -2,13 +2,21 @@ export interface Module {
     name: string
     description: string
     params: Record<string, string>
+    outputCountConfig?: {
+        min: number
+        max: number
+    }
 }
 
 const modules: Module[] = [
     {
         "name": "Branching",
         "description": "Branching node that contains output nodes",
-        "params": {}
+        "params": {},
+        "outputCountConfig": {
+            "min": 1,
+            "max": 10
+        }
     },
     {
         "name": "Type 1",

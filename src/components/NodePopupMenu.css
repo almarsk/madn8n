@@ -61,3 +61,14 @@
   padding: 0.75rem;
   min-height: 60px;
 }
+
+/* Remove default arrows from number input */
+.number-input-no-arrows::-webkit-inner-spin-button,
+.number-input-no-arrows::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.number-input-no-arrows {
+  -moz-appearance: textfield;
+}

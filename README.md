@@ -1,30 +1,74 @@
-# React + TypeScript + Vite
+# Madn8n
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A node-based flow editor built with React, TypeScript, and ReactFlow. Create and connect nodes on an interactive canvas with support for branching nodes and dynamic connections.
 
-Currently, two official plugins are available:
+## TODO
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- main menu
+- undo/redo
+- two way conversion between reactflow and maddie json
+- text editor
+- nodes config ui 
+- branching nodes config ui
 
-## Expanding the ESLint configuration
+## Features
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+- Drag and drop nodes onto the canvas
+- Connect nodes with visual edges
+- Branching nodes with multiple output nodes
+- Interactive toolbar with zoom and view controls
+- Node popup menus for configuration
 
-- Configure the top-level `parserOptions` property like this:
+## Getting Started
 
-```js
-export default {
-  // other rules...
-  parserOptions: {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    project: ['./tsconfig.json', './tsconfig.node.json'],
-    tsconfigRootDir: __dirname,
-  },
-}
+### Prerequisites
+
+- Node.js (v18 or higher)
+- npm or yarn
+
+### Installation
+
+```bash
+# Install dependencies
+npm install
+# or
+yarn install
 ```
 
-- Replace `plugin:@typescript-eslint/recommended` to `plugin:@typescript-eslint/recommended-type-checked` or `plugin:@typescript-eslint/strict-type-checked`
-- Optionally add `plugin:@typescript-eslint/stylistic-type-checked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and add `plugin:react/recommended` & `plugin:react/jsx-runtime` to the `extends` list
+### Development
+
+```bash
+# Start development server
+npm run dev
+# or
+yarn dev
+```
+
+The application will be available at `http://localhost:5173`
+
+### Build
+
+```bash
+# Build for production
+npm run build
+# or
+yarn build
+```
+
+### Preview Production Build
+
+```bash
+# Preview production build
+npm run preview
+# or
+yarn preview
+```
+
+## Project Structure
+
+- `src/App.tsx` - Main application component
+- `src/components/` - React components (Toolbar, FlowCanvas, NodePopupMenu, etc.)
+- `src/DynamicNode.tsx` - Standard node component
+- `src/BranchingNode.tsx` - Branching node wrapper component
+- `src/BranchingNodeOutput.tsx` - Output node component
+- `src/modules.ts` - Node type definitions

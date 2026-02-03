@@ -76,6 +76,8 @@ export default function FlowCanvas({
       proOptions={{ hideAttribution: true }}
       elevateNodesOnSelect={false}
       elevateEdgesOnSelect={false}
+      connectionRadius={40}
+      snapToGrid={false}
     >
       <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#94a3b8" />
     </ReactFlow>

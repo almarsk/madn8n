@@ -39,6 +39,7 @@ function BranchingNodeOutput({ data, id }: NodeProps<BranchingNodeOutputData>) {
                 onClick={handleLabelClick}
             >
                 {data.label}
+                <span className="dynamic-node-label-menu-icon">⋮</span>
             </div>
 
             {/* Output nodes have NO target handles - they only output */}

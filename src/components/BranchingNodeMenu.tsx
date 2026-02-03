@@ -145,6 +145,7 @@ export default function BranchingNodeMenu({
                 color: '#e5e7eb',
                 textAlign: 'center',
               }}
+              className="number-input-no-arrows"
             />
             <button
               type="button"

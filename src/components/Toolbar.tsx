@@ -12,6 +12,7 @@ interface ToolbarProps {
   onLockToggle: () => void
   showMinimap: boolean
   onMinimapToggle: () => void
+  onExportJson: () => void
 }
 
 export default function Toolbar({
@@ -25,6 +26,7 @@ export default function Toolbar({
   onLockToggle,
   showMinimap,
   onMinimapToggle,
+  onExportJson,
 }: ToolbarProps) {
   const [toolbarPosition, setToolbarPosition] = useState({ x: 16, y: 16 })
   const [toolbarSize, setToolbarSize] = useState({ width: 280, height: 260 })
@@ -108,38 +110,7 @@ export default function Toolbar({
         <div className="nodes-toolbar-body">
           <section className="nodes-toolbar-section">
             <div className="toolbar-nav">
-              <button
-                type="button"
-                className="toolbar-nav-button"
-                onClick={onZoomOut}
-                title="Zoom out"
-              >
-                -
-              </button>
-              <button
-                type="button"
-                className="toolbar-nav-button"
-                onClick={onFitView}
-                title="Fit view"
-              >
-                ⛶
-              </button>
-              <button
-                type="button"
-                className="toolbar-nav-button"
-                onClick={onZoomIn}
-                title="Zoom in"
-              >
-                +
-              </button>
-              <button
-                type="button"
-                className={`toolbar-nav-button toolbar-lock-button ${isLocked ? 'toolbar-lock-button--active' : ''}`}
-                onClick={onLockToggle}
-                title={isLocked ? 'Unlock canvas interactions' : 'Lock canvas interactions'}
-              >
-                {isLocked ? '🔒' : '🔓'}
-              </button>
+
               <button
                 type="button"
                 className={`toolbar-nav-button ${showMinimap ? 'toolbar-lock-button--active' : ''}`}
@@ -147,6 +118,14 @@ export default function Toolbar({
                 title={showMinimap ? 'Hide minimap' : 'Show minimap'}
               >
                 🗺️
+              </button>
+              <button
+                type="button"
+                className="toolbar-nav-button"
+                onClick={onExportJson}
+                title="Export JSON to console"
+              >
+                📋
               </button>
             </div>
           </section>

@@ -39,6 +39,7 @@ function BranchingNode({ data, id }: NodeProps<BranchingNodeData>) {
                 onClick={handleLabelClick}
             >
                 {data.label}
+                <span className="dynamic-node-label-menu-icon">⋮</span>
             </div>
 
             {/* Target handles - visible when dragging a connection */}
