@@ -10,6 +10,8 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
 - text editor
 - nodes config ui 
 - branching nodes config ui
+- refactoring
+- validation
 
 ## Features
 
