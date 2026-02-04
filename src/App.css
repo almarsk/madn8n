@@ -452,6 +452,18 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dynamic-node-label > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: calc(100% - 20px);
+  flex: 1;
+  min-width: 0;
 }
 
 .dynamic-node-label-menu-icon {

@@ -1,8 +1,27 @@
 import { useCallback, useRef, useState } from 'react'
 import { ReactFlowInstance, useEdgesState, useNodesState, type Node } from 'reactflow'
 import './App.css'
-import modules from './modules'
+import modules, { type Module } from './modules'
 import nodeConfigs, { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES } from './nodeConfigs'
+
+// Helper to parse Pythonic type notation (e.g., "list[str]", "dict", "list[number]")
+const parseType = (typeStr: string | undefined): { base: string; inner?: string } => {
+  if (!typeStr) return { base: 'string' }
+
+  // Match list[type] or dict[type]
+  const listMatch = typeStr.match(/^list\[(.+)\]$/)
+  if (listMatch) {
+    return { base: 'list', inner: listMatch[1] }
+  }
+
+  const dictMatch = typeStr.match(/^dict(?:\[(.+)\])?$/)
+  if (dictMatch) {
+    return { base: 'dict', inner: dictMatch[1] }
+  }
+
+  return { base: typeStr }
+}
+
 import Toolbar from './components/Toolbar'
 import FlowCanvas from './components/FlowCanvas'
 import Minimap from './Minimap'
@@ -18,15 +37,44 @@ const getId = (() => {
   return () => `node_${id++}`
 })()
 
+// Helper function to get node label from module config and node data
+const getNodeLabel = (module: Module | undefined, nodeData: any, nodeType?: NodeType): string => {
+  if (!module) {
+    return nodeData?.label || 'Unknown'
+  }
+
+  // For branching output nodes, use the value param directly
+  if (nodeType === NODE_TYPES.BRANCHING_OUTPUT) {
+    if (nodeData?.params?.value !== undefined && nodeData.params.value !== null && nodeData.params.value !== '') {
+      return String(nodeData.params.value)
+    }
+    return nodeData?.label || 'Output'
+  }
+
+  // If module has a labelParam, use that param's value
+  if (module.labelParam && nodeData?.params && nodeData.params[module.labelParam] !== undefined) {
+    const paramValue = nodeData.params[module.labelParam]
+    // Convert to string for display
+    if (paramValue !== null && paramValue !== undefined && paramValue !== '') {
+      return String(paramValue)
+    }
+  }
+
+  // Fallback to module name
+  return module.name
+}
+
 // Helper function to create a node based on nodeConfig
 const createNodeFromConfig = (
   nodeType: NodeType,
   position: { x: number; y: number },
   options: {
+    moduleName?: string
     label?: string
     outputCount?: number
     parentNodeId?: string
     connectingFrom?: string | null
+    params?: Record<string, any>
   } = {}
 ): Node => {
   const config = nodeConfigs[nodeType]
@@ -34,18 +82,53 @@ const createNodeFromConfig = (
     throw new Error(`Unknown node type: ${nodeType}`)
   }
 
+  const module = options.moduleName ? modules.find((m) => m.name === options.moduleName) : undefined
+
+  // Initialize params from module if provided
+  const initialParams: Record<string, any> = {}
+  if (module) {
+    Object.keys(module.params).forEach((paramName) => {
+      const param = module.params[paramName]
+      // Set default value based on type
+      if (param.type === 'number') {
+        initialParams[paramName] = 0
+      } else if (param.type === 'boolean') {
+        initialParams[paramName] = false
+      } else {
+        const { base } = parseType(param.type)
+        if (base === 'list') {
+          initialParams[paramName] = []
+        } else if (base === 'dict') {
+          initialParams[paramName] = {}
+        } else {
+          initialParams[paramName] = ''
+        }
+      }
+    })
+  }
+
+  // Merge with provided params
+  const nodeParams = { ...initialParams, ...(options.params || {}) }
+
+  // Calculate label
+  const nodeData: any = {
+    ...config,
+    nodeType,
+    connectingFrom: options.connectingFrom ?? null,
+    moduleName: options.moduleName,
+    params: nodeParams,
+    ...(options.outputCount !== undefined && { outputCount: options.outputCount }),
+    ...(options.parentNodeId && { parentNodeId: options.parentNodeId }),
+  }
+
+  // Set label using helper function
+  nodeData.label = getNodeLabel(module, nodeData, nodeType)
+
   const node: Node = {
     id: getId(),
     type: 'nodeFactory',
     position,
-    data: {
-      ...config,
-      label: options.label || config.name,
-      nodeType,
-      connectingFrom: options.connectingFrom ?? null,
-      ...(options.outputCount !== undefined && { outputCount: options.outputCount }),
-      ...(options.parentNodeId && { parentNodeId: options.parentNodeId }),
-    },
+    data: nodeData,
     style: {
       width: config.defaultWidth ?? 150,
       height: config.defaultHeight ?? 80,
@@ -60,7 +143,7 @@ const createNodeFromConfig = (
 const createBranchingNodeWithOutputs = (
   position: { x: number; y: number },
   outputCount: number,
-  label?: string
+  moduleName?: string
 ): Node[] => {
   const branchingConfig = nodeConfigs.branching
   const outputConfig = nodeConfigs.branchingOutput
@@ -68,6 +151,8 @@ const createBranchingNodeWithOutputs = (
   if (!branchingConfig || !outputConfig) {
     throw new Error('Branching or output config not found')
   }
+
+  const module = moduleName ? modules.find((m) => m.name === moduleName) : undefined
 
   const padding = branchingConfig.padding || 20
   const headerHeight = branchingConfig.headerHeight || 50
@@ -80,17 +165,45 @@ const createBranchingNodeWithOutputs = (
   const branchingNodeHeight = headerHeight + outputSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding
 
   const branchingNodeId = getId()
+
+  // Initialize params from module if provided
+  const initialParams: Record<string, any> = {}
+  if (module) {
+    Object.keys(module.params).forEach((paramName) => {
+      const param = module.params[paramName]
+      if (param.type === 'number') {
+        initialParams[paramName] = 0
+      } else if (param.type === 'boolean') {
+        initialParams[paramName] = false
+      } else {
+        const { base } = parseType(param.type)
+        if (base === 'list') {
+          initialParams[paramName] = []
+        } else if (base === 'dict') {
+          initialParams[paramName] = {}
+        } else {
+          initialParams[paramName] = ''
+        }
+      }
+    })
+  }
+
+  const branchingNodeData: any = {
+    ...branchingConfig,
+    nodeType: NODE_TYPES.BRANCHING,
+    outputCount,
+    connectingFrom: null,
+    moduleName: moduleName,
+    params: initialParams,
+  }
+
+  branchingNodeData.label = getNodeLabel(module, branchingNodeData, NODE_TYPES.BRANCHING)
+
   const branchingNode: Node = {
     id: branchingNodeId,
     type: 'nodeFactory',
     position,
-    data: {
-      ...branchingConfig,
-      label: label || branchingConfig.name,
-      nodeType: NODE_TYPES.BRANCHING,
-      outputCount,
-      connectingFrom: null,
-    },
+    data: branchingNodeData,
     style: {
       width: branchingNodeWidth,
       height: branchingNodeHeight,
@@ -101,6 +214,36 @@ const createBranchingNodeWithOutputs = (
   // Create output nodes
   const outputNodes: Node[] = []
   for (let i = 0; i < outputCount; i++) {
+    // Determine output node label based on outputConfig
+    let outputLabel = `Output ${i + 1}`
+    let outputParams: Record<string, any> = {}
+
+    if (module?.outputConfig) {
+      if (module.outputConfig.type === 'listParam' && module.outputConfig.listParamName) {
+        // For listParam type, we'll initialize the param but label stays default for now
+        // The actual value will come from the menu
+        const listParam = module.params[module.outputConfig.listParamName]
+        if (listParam) {
+          // Initialize based on list element type (assuming it's an array of the param type)
+          // For now, just use string as default
+          outputParams.value = ''
+        }
+      } else if (module.outputConfig.type === 'internal') {
+        // For internal type, just use default label
+        outputLabel = `Output ${i + 1}`
+      }
+    }
+
+    const outputNodeData: any = {
+      ...outputConfig,
+      nodeType: NODE_TYPES.BRANCHING_OUTPUT,
+      parentNodeId: branchingNodeId,
+      connectingFrom: null,
+      moduleName: moduleName,
+      params: outputParams,
+      label: outputLabel,
+    }
+
     const outputNode: Node = {
       id: getId(),
       type: 'nodeFactory',
@@ -108,13 +251,7 @@ const createBranchingNodeWithOutputs = (
         x: position.x + padding,
         y: position.y + headerHeight + outputSpacing + i * (outputNodeHeight + outputSpacing),
       },
-      data: {
-        ...outputConfig,
-        label: `Output ${i + 1}`,
-        nodeType: NODE_TYPES.BRANCHING_OUTPUT,
-        parentNodeId: branchingNodeId,
-        connectingFrom: null,
-      },
+      data: outputNodeData,
       style: {
         width: outputNodeWidth,
         height: outputNodeHeight,
@@ -186,13 +323,18 @@ function App() {
       // Create node(s) based on config type
       if (isBranchingNodeType(module.type)) {
         const branchingConfig = nodeConfigs.branching
-        const outputCount = branchingConfig?.defaultOutputCount ?? 1
+        // For internal type, use the fixed output count from module config
+        // For listParam type, use default from nodeConfig
+        let outputCount = branchingConfig?.defaultOutputCount ?? 1
+        if (module.outputConfig?.type === 'internal' && module.outputConfig.outputCount !== undefined) {
+          outputCount = module.outputConfig.outputCount
+        }
         const nodes = createBranchingNodeWithOutputs(position, outputCount, module.name)
         setNodes((nds) => nds.concat(nodes))
       } else {
         // Single node (or any other non-branching type)
         const newNode = createNodeFromConfig(module.type as NodeType, position, {
-          label: module.name,
+          moduleName: module.name,
           connectingFrom: null,
         })
         setNodes((nds) => nds.concat(newNode))
@@ -299,13 +441,18 @@ function App() {
         // Create node(s) based on config type
         if (isBranchingNodeType(module.type)) {
           const branchingConfig = nodeConfigs.branching
-          const outputCount = branchingConfig?.defaultOutputCount ?? 1
+          // For internal type, use the fixed output count from module config
+          // For listParam type, use default from nodeConfig
+          let outputCount = branchingConfig?.defaultOutputCount ?? 1
+          if (module.outputConfig?.type === 'internal' && module.outputConfig.outputCount !== undefined) {
+            outputCount = module.outputConfig.outputCount
+          }
           const nodes = createBranchingNodeWithOutputs(finalPosition, outputCount, module.name)
           return nds.concat(nodes)
         } else {
           // Single node (or any other non-branching type)
           const newNode = createNodeFromConfig(module.type as NodeType, finalPosition, {
-            label: module.name,
+            moduleName: module.name,
             connectingFrom: null,
           })
           return nds.concat(newNode)
@@ -449,14 +596,72 @@ function App() {
     setOpenMenuNodeId(null)
   }, [])
 
+  const handleNodeDataUpdate = useCallback((nodeId: string, updatedData: any) => {
+    setNodes((nds) => {
+      return nds.map((node) => {
+        if (node.id === nodeId) {
+          const updatedNode = {
+            ...node,
+            data: {
+              ...node.data,
+              ...updatedData,
+            },
+          }
+
+          // Recalculate label if module info is available
+          if (updatedNode.data.moduleName) {
+            const module = modules.find((m) => m.name === updatedNode.data.moduleName)
+            const nodeType = updatedNode.data?.nodeType as NodeType | undefined
+            updatedNode.data.label = getNodeLabel(module, updatedNode.data, nodeType)
+          }
+
+          return updatedNode
+        }
+        return node
+      })
+    })
+  }, [setNodes])
+
   const handleExportJson = useCallback(() => {
     if (!reactFlowInstance) {
       console.warn('ReactFlow instance not available')
       return
     }
-    const flowData = reactFlowInstance.toObject()
-    console.log('ReactFlow JSON:', JSON.stringify(flowData, null, 2))
-  }, [reactFlowInstance])
+
+    // Export only module logic: nodes, edges, and params (no config info)
+    const exportData = {
+      nodes: nodes.map((node) => {
+        const nodeType = node.data?.nodeType as NodeType | undefined
+        return {
+          id: node.id,
+          type: nodeType || 'single', // Use actual nodeType instead of 'nodeFactory'
+          position: node.position,
+          data: {
+            moduleName: node.data?.moduleName,
+            params: node.data?.params || {},
+            ...(node.data?.parentNodeId && { parentNodeId: node.data.parentNodeId }),
+            ...(node.data?.outputCount !== undefined && { outputCount: node.data.outputCount }),
+          },
+        }
+      }),
+      edges: edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        ...(edge.sourceHandle && { sourceHandle: edge.sourceHandle }),
+        ...(edge.targetHandle && { targetHandle: edge.targetHandle }),
+      })),
+    }
+
+    console.log('Export JSON:', JSON.stringify(exportData, null, 2))
+
+    // Also copy to clipboard
+    navigator.clipboard.writeText(JSON.stringify(exportData, null, 2)).then(() => {
+      console.log('JSON copied to clipboard')
+    }).catch((err) => {
+      console.error('Failed to copy to clipboard:', err)
+    })
+  }, [reactFlowInstance, nodes, edges])
 
   const handleValidate = useCallback(() => {
     // Get all nodes that have source handles (can output)
@@ -502,6 +707,16 @@ function App() {
   }, [])
 
   const handleOutputCountChange = useCallback((nodeId: string, count: number) => {
+    // Find the node and check if it's internal type (output count is fixed)
+    const node = nodes.find((n) => n.id === nodeId)
+    if (node?.data?.moduleName) {
+      const module = modules.find((m) => m.name === node.data.moduleName)
+      if (module?.outputConfig?.type === 'internal') {
+        // Don't allow output count changes for internal type
+        return
+      }
+    }
+
     setNodes((nds) => {
       // Update the branching node's output count
       const updatedNodes = nds.map((node) => {
@@ -574,15 +789,42 @@ function App() {
           return nodesWithUpdatedBranching
         }
 
+        // Get module info from branching node
+        const branchingModule = branchingNode.data?.moduleName ? modules.find((m) => m.name === branchingNode.data.moduleName) : undefined
+
         for (let i = currentCount; i < newCount; i++) {
+          // Determine output node params based on outputConfig
+          let outputParams: Record<string, any> = {}
+          let outputLabel = `Output ${i + 1}`
+
+          if (branchingModule?.outputConfig) {
+            if (branchingModule.outputConfig.type === 'listParam' && branchingModule.outputConfig.listParamName) {
+              const listParam = branchingModule.params[branchingModule.outputConfig.listParamName]
+              if (listParam) {
+                // Initialize based on param type
+                if (listParam.type === 'number') {
+                  outputParams.value = 0
+                } else if (listParam.type === 'boolean') {
+                  outputParams.value = false
+                } else {
+                  outputParams.value = ''
+                }
+              }
+            }
+          }
+
           const outputNode = createNodeFromConfig(NODE_TYPES.BRANCHING_OUTPUT, {
             x: branchingPos.x + padding,
             y: branchingPos.y + headerHeight + outputSpacing + i * (outputNodeHeight + outputSpacing),
           }, {
-            label: `Output ${i + 1}`,
+            moduleName: branchingNode.data?.moduleName,
             parentNodeId: nodeId,
             connectingFrom: null,
+            params: outputParams,
           })
+
+          // Set label for output node
+          outputNode.data.label = outputLabel
           nodesToAdd.push(outputNode)
         }
         return [...nodesWithUpdatedBranching, ...nodesToAdd]
@@ -641,17 +883,125 @@ function App() {
     })
   }, [setNodes, setEdges])
 
+  const handleAddOutput = useCallback((nodeId: string) => {
+    setNodes((nds) => {
+      const branchingNode = nds.find((n) => n.id === nodeId)
+      if (!branchingNode) return nds
+
+      const module = branchingNode.data?.moduleName ? modules.find((m) => m.name === branchingNode.data.moduleName) : undefined
+      if (!module?.outputConfig || module.outputConfig.type !== 'listParam' || !module.outputConfig.listParamName) {
+        return nds
+      }
+
+      const listParamName = module.outputConfig.listParamName
+      const currentArray = Array.isArray(branchingNode.data?.params?.[listParamName])
+        ? [...branchingNode.data.params[listParamName]]
+        : []
+
+      // Add new empty value to array
+      const { inner } = parseType(module.params[listParamName]?.type)
+      let newValue: any = ''
+      if (inner === 'number') {
+        newValue = 0
+      } else if (inner === 'boolean') {
+        newValue = false
+      }
+
+      const updatedArray = [...currentArray, newValue]
+
+      // Update the branching node's params
+      const updatedNodes = nds.map((node) => {
+        if (node.id === nodeId) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              params: {
+                ...node.data.params,
+                [listParamName]: updatedArray,
+              },
+            },
+          }
+        }
+        return node
+      })
+
+      // Get existing output nodes
+      const existingOutputNodes = updatedNodes.filter((n) => {
+        const nType = n.data?.nodeType as NodeType | undefined
+        return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === nodeId
+      })
+
+      const branchingConfig = nodeConfigs.branching
+      if (!branchingConfig) return updatedNodes
+
+      const padding = branchingConfig.padding || 20
+      const headerHeight = branchingConfig.headerHeight || 50
+      const outputSpacing = branchingConfig.outputSpacing || 10
+      const outputNodeWidth = branchingConfig.outputNodeWidth || 130
+      const outputNodeHeight = branchingConfig.outputNodeHeight || 60
+
+      // Create new output node
+      const newIndex = existingOutputNodes.length
+      const branchingPos = branchingNode.position || { x: 0, y: 0 }
+
+      const outputParams: Record<string, any> = { value: newValue }
+      const outputNode = createNodeFromConfig(NODE_TYPES.BRANCHING_OUTPUT, {
+        x: branchingPos.x + padding,
+        y: branchingPos.y + headerHeight + outputSpacing + newIndex * (outputNodeHeight + outputSpacing),
+      }, {
+        moduleName: branchingNode.data?.moduleName,
+        parentNodeId: nodeId,
+        connectingFrom: null,
+        params: outputParams,
+      })
+
+      outputNode.data.label = String(newValue) || 'Output'
+
+      // Update branching node size
+      const newOutputCount = newIndex + 1
+      const branchingNodeWidth = outputNodeWidth + padding * 2
+      const branchingNodeHeight = headerHeight + outputSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
+
+      const finalNodes = updatedNodes.map((node) => {
+        if (node.id === nodeId) {
+          return {
+            ...node,
+            style: {
+              ...node.style,
+              width: branchingNodeWidth,
+              height: branchingNodeHeight,
+            },
+            data: {
+              ...node.data,
+              outputCount: newOutputCount,
+            },
+          }
+        }
+        return node
+      })
+
+      return [...finalNodes, outputNode]
+    })
+  }, [setNodes])
+
   // Update nodes with label click handler, make output nodes non-draggable, and set zIndex for proper layering
   // zIndex values come from nodeConfigs
+  // Also recalculate labels dynamically based on module config
   const nodesWithHandlers = nodes.map((node) => {
     const nodeType = (node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType
     const config = nodeConfigs[nodeType]
     const zIndex = config?.zIndex ?? 2 // Default fallback
 
+    // Recalculate label based on module config
+    const module = node.data?.moduleName ? modules.find((m) => m.name === node.data.moduleName) : undefined
+    const calculatedLabel = getNodeLabel(module, node.data, nodeType)
+
     return {
       ...node,
       data: {
         ...node.data,
+        label: calculatedLabel,
         onLabelClick: handleLabelClick,
       },
       draggable: !(node.data?.nodeType && isBranchingOutputNodeType(node.data.nodeType as NodeType)), // Output nodes are not draggable - they move with parent
@@ -707,6 +1057,8 @@ function App() {
               reactFlowWrapper={reactFlowWrapper}
               reactFlowInstance={reactFlowInstance}
               onOutputCountChange={menuNode.data?.nodeType && isBranchingNodeType(menuNode.data.nodeType as NodeType) ? handleOutputCountChange : undefined}
+              onNodeDataUpdate={handleNodeDataUpdate}
+              onAddOutput={menuNode.data?.nodeType && isBranchingNodeType(menuNode.data.nodeType as NodeType) ? handleAddOutput : undefined}
             />
           )
         })()}

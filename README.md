@@ -12,11 +12,10 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
     - branching nodes config ui
     - undo/redo
     - text editor
-    - validation
+    - validation params
 
 - maintenance
     - refactoring
-    - module types
 
 ## Features
 

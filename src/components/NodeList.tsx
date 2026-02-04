@@ -1,5 +1,7 @@
+import { type Module } from '../modules'
+
 interface NodeListProps {
-  modules: Array<{ name: string; description: string; params: Record<string, string> }>
+  modules: Module[]
   onNodeDragStart: (type: string) => (event: React.DragEvent) => void
   onSidebarNodeClick: (moduleName: string) => void
 }

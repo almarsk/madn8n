@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps, useReactFlow } from 'reactflow'
-import nodeConfigs, { type NodeConfig, type NodeType, isBranchingNodeType } from './nodeConfigs'
+import nodeConfigs, { type NodeConfig, type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES } from './nodeConfigs'
 
 interface NodeFactoryData extends NodeConfig {
     label: string
@@ -44,6 +44,16 @@ function NodeFactory({ data, id }: NodeProps<NodeFactoryData>) {
         }
     }
 
+    // For branching output nodes, make the entire node clickable
+    const handleNodeClick = (e: React.MouseEvent) => {
+        if (isBranchingOutputNodeType(nodeType)) {
+            e.stopPropagation()
+            if (data.onLabelClick) {
+                data.onLabelClick(id)
+            }
+        }
+    }
+
     // Determine if source handles should be shown
     // For single nodes: only show if not connected yet
     // For branchingOutput: only show if not connected yet
@@ -63,12 +73,13 @@ function NodeFactory({ data, id }: NodeProps<NodeFactoryData>) {
         <div
             className={nodeClasses}
             style={{ cursor: cursorStyle }}
+            onClick={isBranchingOutputNodeType(nodeType) ? handleNodeClick : undefined}
         >
             <div
                 className={`dynamic-node-label ${isBranchingNodeType(nodeType) ? 'branching-node-header' : ''}`}
                 onClick={handleLabelClick}
             >
-                {data.label}
+                <span>{data.label}</span>
                 <span className="dynamic-node-label-menu-icon">⋮</span>
             </div>
 
