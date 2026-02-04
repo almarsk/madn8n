@@ -21,6 +21,8 @@ interface ToolbarProps {
   canUndo: boolean
   canRedo: boolean
   hasNodes: boolean
+  toolbarRef: React.RefObject<HTMLDivElement>
+  onOpenFlowConfigMenu: () => void
 }
 
 export default function Toolbar({
@@ -41,12 +43,13 @@ export default function Toolbar({
   canUndo,
   canRedo,
   hasNodes,
+  toolbarRef,
+  onOpenFlowConfigMenu,
 }: ToolbarProps) {
   const [toolbarPosition, setToolbarPosition] = useState({ x: 16, y: 16 })
   const [toolbarSize, setToolbarSize] = useState({ width: 280, height: 260 })
   const [isToolbarMinimized, setIsToolbarMinimized] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const toolbarRef = useRef<HTMLDivElement>(null)
 
   // Filter modules based on search query (substring search, case-insensitive)
   const filteredModules = modules.filter((module) =>
@@ -153,7 +156,7 @@ export default function Toolbar({
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaY = moveEvent.clientY - startY
       let nextHeight = Math.max(160, height + deltaY)
-      
+
       // Constrain height to viewport
       const viewportHeight = window.innerHeight
       const margin = 10
@@ -201,6 +204,14 @@ export default function Toolbar({
         <div className="nodes-toolbar-body">
           <section className="nodes-toolbar-section">
             <div className="toolbar-nav">
+              <button
+                type="button"
+                className="toolbar-nav-button flow-config-button"
+                onClick={onOpenFlowConfigMenu}
+                title="Flow Configuration"
+              >
+                ⚙️
+              </button>
               <button
                 type="button"
                 className={`toolbar-nav-button ${showMinimap ? 'toolbar-lock-button--active' : ''}`}

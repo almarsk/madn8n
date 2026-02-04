@@ -1,14 +1,13 @@
 import { useMemo } from 'react'
 import ReactFlow, {
   ReactFlowInstance,
-  Background,
-  BackgroundVariant,
   type Node,
   type Edge,
   type Connection,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import NodeFactory from '../NodeFactory'
+import HierarchicalGridBackground from './HierarchicalGridBackground'
 
 interface FlowCanvasProps {
   nodes: Node[]
@@ -25,6 +24,7 @@ interface FlowCanvasProps {
   onMove: (event: MouseEvent | TouchEvent | null, viewport: { x: number; y: number; zoom: number }) => void
   onPaneClick?: (event: React.MouseEvent) => void
   isLocked: boolean
+  viewport: { x: number; y: number; zoom: number }
 }
 
 export default function FlowCanvas({
@@ -42,6 +42,7 @@ export default function FlowCanvas({
   onMove,
   onPaneClick,
   isLocked,
+  viewport,
 }: FlowCanvasProps) {
   const nodeTypes = useMemo(
     () => ({
@@ -77,7 +78,7 @@ export default function FlowCanvas({
       connectionRadius={40}
       snapToGrid={false}
     >
-      <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#94a3b8" />
+      <HierarchicalGridBackground zoom={viewport.zoom} />
     </ReactFlow>
   )
 }

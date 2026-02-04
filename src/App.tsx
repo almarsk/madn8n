@@ -29,6 +29,14 @@ function App() {
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [openMenuNodeId, setOpenMenuNodeId] = useState<string | null>(null)
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null)
+  const [isFlowConfigMenuOpen, setIsFlowConfigMenuOpen] = useState(false)
+  const [flowConfigMenuPosition, setFlowConfigMenuPosition] = useState<{ x: number; y: number } | null>(null)
+  const [flowMetadata, setFlowMetadata] = useState({
+    description: '',
+    userInitialTimeout: 0,
+    voice: 'Voice 1',
+  })
+  const toolbarRef = useRef<HTMLDivElement>(null)
   const [validationStatus, setValidationStatus] = useState<{ isValid: boolean | null; message: string }>({
     isValid: null,
     message: '',
@@ -172,8 +180,12 @@ function App() {
         })
         setNodes((nds) => nds.concat(newNode))
       }
+
+      // Close menu when adding a new node
+      setOpenMenuNodeId(null)
+      setMenuPosition(null)
     },
-    [reactFlowInstance, setNodes, saveHistoryBeforeChange, isLocked]
+    [reactFlowInstance, setNodes, saveHistoryBeforeChange, isLocked, setOpenMenuNodeId, setMenuPosition]
   )
 
   const onNodeDragStart = (type: string) => (event: React.DragEvent) => {
@@ -299,8 +311,12 @@ function App() {
         // Return unchanged if no module found
         return nds
       })
+
+      // Close menu when adding a new node
+      setOpenMenuNodeId(null)
+      setMenuPosition(null)
     },
-    [reactFlowInstance, setNodes, modules, saveHistoryBeforeChange, isLocked]
+    [reactFlowInstance, setNodes, modules, saveHistoryBeforeChange, isLocked, setOpenMenuNodeId, setMenuPosition]
   )
 
   const handleZoomIn = () => {
@@ -372,12 +388,20 @@ function App() {
 
       // Close menu when a different node starts being dragged (but not the node whose menu is open)
       const dragStartChanges = filteredChanges.filter((change) => change.type === 'position' && change.position)
-      if (dragStartChanges.length > 0 && openMenuNodeId) {
-        const draggedNodeId = dragStartChanges[0].id
-        // Only close if a different node is being dragged
-        if (draggedNodeId !== openMenuNodeId) {
-          setOpenMenuNodeId(null)
-          setMenuPosition(null)
+      if (dragStartChanges.length > 0) {
+        // Close flow config menu when any node starts being dragged
+        if (isFlowConfigMenuOpen) {
+          setIsFlowConfigMenuOpen(false)
+          setFlowConfigMenuPosition(null)
+        }
+        // Close node menu if a different node is being dragged
+        if (openMenuNodeId) {
+          const draggedNodeId = dragStartChanges[0].id
+          // Only close if a different node is being dragged
+          if (draggedNodeId !== openMenuNodeId) {
+            setOpenMenuNodeId(null)
+            setMenuPosition(null)
+          }
         }
       }
 
@@ -604,7 +628,7 @@ function App() {
 
       onNodesChange(filteredChanges)
     },
-    [nodes, onNodesChange, setNodes, setEdges, saveHistoryBeforeChange, saveHistoryForPositionChange, isLocked]
+    [nodes, onNodesChange, setNodes, setEdges, saveHistoryBeforeChange, saveHistoryForPositionChange, isLocked, isFlowConfigMenuOpen, openMenuNodeId]
   )
 
   const handleLabelClick = useCallback((nodeId: string) => {
@@ -613,6 +637,11 @@ function App() {
     if (openMenuNodeId && openMenuNodeId !== nodeId) {
       setOpenMenuNodeId(null)
       setMenuPosition(null)
+    }
+    // Close flow config menu if open
+    if (isFlowConfigMenuOpen) {
+      setIsFlowConfigMenuOpen(false)
+      setFlowConfigMenuPosition(null)
     }
 
     // If clicking on an output node menu icon, ensure the output node is selected (not the parent)
@@ -657,6 +686,23 @@ function App() {
     setMenuPosition(null)
   }, [])
 
+  const handleOpenFlowConfigMenu = useCallback(() => {
+    // Close node menu if open
+    setOpenMenuNodeId(null)
+    setMenuPosition(null)
+    setIsFlowConfigMenuOpen(true)
+    setFlowConfigMenuPosition(null) // Will be auto-positioned next to toolbar
+  }, [])
+
+  const handleCloseFlowConfigMenu = useCallback(() => {
+    setIsFlowConfigMenuOpen(false)
+    setFlowConfigMenuPosition(null)
+  }, [])
+
+  const handleFlowMetadataUpdate = useCallback((metadata: { description: string; userInitialTimeout: number; voice: string }) => {
+    setFlowMetadata(metadata)
+  }, [])
+
   const handleMenuPositionChange = useCallback((position: { x: number; y: number } | null) => {
     setMenuPosition(position)
   }, [])
@@ -671,6 +717,9 @@ function App() {
     if (!isToolbarButton && !isToolbar) {
       setOpenMenuNodeId(null)
       setMenuPosition(null)
+      // Also close flow config menu
+      setIsFlowConfigMenuOpen(false)
+      setFlowConfigMenuPosition(null)
     }
   }, [])
 
@@ -721,8 +770,96 @@ function App() {
       const node = nds.find((n) => n.id === nodeId)
       if (!node) return nds
 
-      // If it's a branching node, also remove its output nodes
+      // If it's an output node, handle parent branching node updates
       const nodeType = node.data?.nodeType as NodeType | undefined
+      if (nodeType && isBranchingOutputNodeType(nodeType) && node.data?.parentNodeId) {
+        const parentId = node.data.parentNodeId
+        const branchingNode = nds.find((n) => n.id === parentId)
+        if (!branchingNode) return nds.filter((n) => n.id !== nodeId)
+
+        const module = branchingNode.data?.moduleName ? modules.find((m) => m.name === branchingNode.data.moduleName) : undefined
+        if (!module?.outputConfig || module.outputConfig.type !== 'listParam') {
+          // For non-listParam branching nodes, just remove the output node
+          return nds.filter((n) => n.id !== nodeId)
+        }
+
+        // Remove the deleted output node
+        let updatedNodes = nds.filter((n) => n.id !== nodeId)
+
+        // Get remaining output nodes (after deletion)
+        const remainingOutputNodes = updatedNodes.filter((n) => {
+          const nType = n.data?.nodeType as NodeType | undefined
+          return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === parentId
+        })
+
+        // Update the list param array - remove the deleted output node's value
+        const listParamName = module.outputConfig.listParamName
+        const currentArray = Array.isArray(branchingNode.data?.params?.[listParamName])
+          ? [...branchingNode.data.params[listParamName]]
+          : []
+
+        const deletedIndex = typeof node.data?.outputIndex === 'number' ? node.data.outputIndex : -1
+        let updatedArray = [...currentArray]
+        if (deletedIndex >= 0 && deletedIndex < updatedArray.length) {
+          updatedArray.splice(deletedIndex, 1)
+        }
+
+        // Sort remaining output nodes by their current outputIndex to maintain order
+        const sortedRemaining = [...remainingOutputNodes].sort((a, b) => {
+          const idxA = typeof a.data?.outputIndex === 'number' ? a.data.outputIndex : 0
+          const idxB = typeof b.data?.outputIndex === 'number' ? b.data.outputIndex : 0
+          return idxA - idxB
+        })
+
+        // Update output indices to be sequential (0, 1, 2, ...)
+        sortedRemaining.forEach((outputNode, newIndex) => {
+          const nodeIndex = updatedNodes.findIndex((n) => n.id === outputNode.id)
+          if (nodeIndex >= 0) {
+            updatedNodes[nodeIndex] = {
+              ...updatedNodes[nodeIndex],
+              data: {
+                ...updatedNodes[nodeIndex].data,
+                outputIndex: newIndex,
+              },
+            }
+          }
+        })
+
+        // Recalculate branching node size
+        const layoutConstants = getBranchingLayoutConstants()
+        const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight } = layoutConstants
+        const newOutputCount = remainingOutputNodes.length
+        const branchingNodeWidth = outputNodeWidth + padding * 2
+        const branchingNodeHeight = headerHeight + outputSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
+
+        // Update branching node
+        const branchingIndex = updatedNodes.findIndex((n) => n.id === parentId)
+        if (branchingIndex >= 0) {
+          updatedNodes[branchingIndex] = {
+            ...updatedNodes[branchingIndex],
+            style: {
+              ...updatedNodes[branchingIndex].style,
+              width: branchingNodeWidth,
+              height: branchingNodeHeight,
+            },
+            data: {
+              ...updatedNodes[branchingIndex].data,
+              params: {
+                ...updatedNodes[branchingIndex].data.params,
+                [listParamName]: updatedArray,
+              },
+              outputCount: newOutputCount,
+            },
+          }
+        }
+
+        // Reposition remaining output nodes - this will use the updated outputIndex values
+        updatedNodes = repositionOutputNodes(updatedNodes, parentId, layoutConstants)
+
+        return updatedNodes
+      }
+
+      // If it's a branching node, also remove its output nodes
       if (nodeType && isBranchingNodeType(nodeType)) {
         const outputNodeIds = nds
           .filter((n) => {
@@ -1044,6 +1181,8 @@ function App() {
           onRedo={handleRedo}
           canUndo={history.canUndo}
           canRedo={history.canRedo}
+          toolbarRef={toolbarRef}
+          onOpenFlowConfigMenu={handleOpenFlowConfigMenu}
         />
 
         <FlowCanvas
@@ -1064,6 +1203,7 @@ function App() {
           onMove={onMove}
           onPaneClick={handlePaneClick}
           isLocked={isLocked}
+          viewport={viewport}
         />
 
         {openMenuNodeId && reactFlowInstance && (() => {
@@ -1084,6 +1224,21 @@ function App() {
             />
           )
         })()}
+
+        {isFlowConfigMenuOpen && reactFlowInstance && (
+          <NodePopupMenu
+            onClose={handleCloseFlowConfigMenu}
+            reactFlowWrapper={reactFlowWrapper}
+            reactFlowInstance={reactFlowInstance}
+            isFlowConfig={true}
+            flowMetadata={flowMetadata}
+            onFlowMetadataUpdate={handleFlowMetadataUpdate}
+            toolbarRef={toolbarRef}
+            title="Flow Configuration"
+            initialPosition={flowConfigMenuPosition}
+            onPositionChange={setFlowConfigMenuPosition}
+          />
+        )}
 
         {showMinimap && reactFlowInstance && (
           <Minimap

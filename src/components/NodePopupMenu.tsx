@@ -10,7 +10,7 @@ import { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYP
 import { parseType, displayType } from '../utils/nodeUtils'
 
 interface NodePopupMenuProps {
-  node: Node
+  node?: Node
   onClose: () => void
   reactFlowWrapper: React.RefObject<HTMLDivElement>
   reactFlowInstance: ReactFlowInstance | null
@@ -19,6 +19,16 @@ interface NodePopupMenuProps {
   onDeleteNode?: (nodeId: string) => void
   initialPosition?: { x: number; y: number } | null
   onPositionChange?: (position: { x: number; y: number } | null) => void
+  // Flow config mode
+  isFlowConfig?: boolean
+  flowMetadata?: {
+    description: string
+    userInitialTimeout: number
+    voice: string
+  }
+  onFlowMetadataUpdate?: (metadata: { description: string; userInitialTimeout: number; voice: string }) => void
+  toolbarRef?: React.RefObject<HTMLDivElement>
+  title?: string
 }
 
 // Helper to get default value based on type
@@ -151,6 +161,8 @@ const renderParamInput = (
   }
 }
 
+const PLACEHOLDER_VOICES = ['Voice 1', 'Voice 2', 'Voice 3']
+
 export default function NodePopupMenu({
   node,
   onClose,
@@ -160,7 +172,12 @@ export default function NodePopupMenu({
   onAddOutput,
   onDeleteNode,
   initialPosition,
-  onPositionChange
+  onPositionChange,
+  isFlowConfig = false,
+  flowMetadata,
+  onFlowMetadataUpdate,
+  toolbarRef,
+  title,
 }: NodePopupMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
@@ -169,21 +186,32 @@ export default function NodePopupMenu({
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-  const [menuSize, setMenuSize] = useState({ width: 280, height: 250 })
+  const [menuSize, setMenuSize] = useState({ width: 280, height: 180 })
   const questionMarkRef = useRef<HTMLSpanElement>(null)
-  const nodeType = (node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType
-  const module = node.data?.moduleName ? modules.find((m: Module) => m.name === node.data.moduleName) : undefined
+  const nodeType = node ? ((node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType) : undefined
+  const module = node?.data?.moduleName ? modules.find((m: Module) => m.name === node.data.moduleName) : undefined
 
   // Track if user has manually positioned the menu
   const userPositionedRef = useRef(!!initialPosition)
 
-  // Initialize params state from node data
-  const [params, setParams] = useState<Record<string, any>>(node.data?.params || {})
+  // Initialize params state from node data (only for node config)
+  const [params, setParams] = useState<Record<string, any>>(node?.data?.params || {})
+
+  // Initialize flow metadata state (only for flow config)
+  const [metadata, setMetadata] = useState(flowMetadata || { description: '', userInitialTimeout: 0, voice: 'Voice 1' })
 
   useEffect(() => {
-    // Update params when node data changes
-    setParams(node.data?.params || {})
-  }, [node.data.params])
+    if (isFlowConfig && flowMetadata) {
+      setMetadata(flowMetadata)
+    }
+  }, [isFlowConfig, flowMetadata])
+
+  useEffect(() => {
+    // Update params when node data changes (only for node config)
+    if (!isFlowConfig && node) {
+      setParams(node.data?.params || {})
+    }
+  }, [node?.data.params, isFlowConfig])
 
   // Track if position update is needed (prevent updates during undo/redo)
   const shouldUpdatePositionRef = useRef(true)
@@ -198,27 +226,43 @@ export default function NodePopupMenu({
 
   useEffect(() => {
     // If user has manually positioned, don't auto-update
-    if (userPositionedRef.current || !reactFlowInstance || !reactFlowWrapper.current || isDragging) return
+    if (userPositionedRef.current || isDragging) return
 
     const updatePosition = () => {
-      if (!reactFlowInstance || !reactFlowWrapper.current || !shouldUpdatePositionRef.current || isDragging || userPositionedRef.current) return
+      if (!shouldUpdatePositionRef.current || isDragging || userPositionedRef.current) return
 
-      const nodePosition = node.position
-      const style = node.style || {}
-      const nodeWidth = typeof style.width === 'number' ? style.width : 150
+      let newPosition: { x: number; y: number }
 
-      // Convert flow position to screen position
-      const screenPos = reactFlowInstance.flowToScreenPosition({
-        x: nodePosition.x + nodeWidth + 10,
-        y: nodePosition.y,
-      })
+      if (isFlowConfig && toolbarRef?.current) {
+        // Position next to toolbar for flow config
+        const toolbarRect = toolbarRef.current.getBoundingClientRect()
+        const spacing = 10
 
-      // Get the wrapper's bounding rect to adjust for its position
-      const wrapperRect = reactFlowWrapper.current.getBoundingClientRect()
+        newPosition = {
+          x: toolbarRect.right + spacing,
+          y: toolbarRect.top,
+        }
+      } else if (!isFlowConfig && node && reactFlowInstance && reactFlowWrapper.current) {
+        // Position next to node for node config
+        const nodePosition = node.position
+        const style = node.style || {}
+        const nodeWidth = typeof style.width === 'number' ? style.width : 150
 
-      let newPosition = {
-        x: wrapperRect.left + screenPos.x,
-        y: wrapperRect.top + screenPos.y,
+        // Convert flow position to screen position
+        const screenPos = reactFlowInstance.flowToScreenPosition({
+          x: nodePosition.x + nodeWidth + 10,
+          y: nodePosition.y,
+        })
+
+        // Get the wrapper's bounding rect to adjust for its position
+        const wrapperRect = reactFlowWrapper.current.getBoundingClientRect()
+
+        newPosition = {
+          x: wrapperRect.left + screenPos.x,
+          y: wrapperRect.top + screenPos.y,
+        }
+      } else {
+        return
       }
 
       // Constrain menu to viewport bounds
@@ -249,20 +293,27 @@ export default function NodePopupMenu({
     // Calculate position immediately
     updatePosition()
 
-    // Update position when viewport changes or node moves
-    const interval = setInterval(updatePosition, 100)
-
-    return () => clearInterval(interval)
-  }, [node.id, node.position, node.style, reactFlowInstance, reactFlowWrapper, isDragging, onPositionChange])
+    // Update position when viewport changes or node moves (only for node config)
+    if (!isFlowConfig && node) {
+      const interval = setInterval(updatePosition, 100)
+      return () => clearInterval(interval)
+    } else {
+      // For flow config, update on window resize
+      window.addEventListener('resize', updatePosition)
+      return () => window.removeEventListener('resize', updatePosition)
+    }
+  }, [isFlowConfig, node?.id, node?.position, node?.style, reactFlowInstance, reactFlowWrapper, isDragging, onPositionChange, toolbarRef, menuSize])
 
   // Re-enable position updates after a short delay (allows undo/redo to complete)
   useEffect(() => {
-    shouldUpdatePositionRef.current = true
-  }, [node.id, node.position])
+    if (!isFlowConfig && node) {
+      shouldUpdatePositionRef.current = true
+    }
+  }, [isFlowConfig, node?.id, node?.position])
 
   // Update tooltip position when question mark moves (e.g., menu is dragged)
   useEffect(() => {
-    if (!showTooltip || !questionMarkRef.current) return
+    if (!showTooltip || !questionMarkRef.current || !node) return
 
     const updateTooltipPosition = () => {
       if (!questionMarkRef.current) return
@@ -305,7 +356,7 @@ export default function NodePopupMenu({
     } else {
       userPositionedRef.current = true
     }
-  }, [node.id, initialPosition])
+  }, [node?.id, initialPosition, isFlowConfig])
 
   // Apply viewport constraints when menu is first opened or position changes
   useEffect(() => {
@@ -423,7 +474,7 @@ export default function NodePopupMenu({
     }, 150) // Small delay to prevent immediate closing
 
     return () => clearTimeout(timeout)
-  }, [node.id])
+  }, [node?.id])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -431,9 +482,10 @@ export default function NodePopupMenu({
       const isMenuIcon = target.closest('.dynamic-node-label-menu-icon') !== null
       const isToolbar = target.closest('.nodes-toolbar') !== null
       const isToolbarButton = target.closest('.toolbar-nav-button') !== null
+      const isFlowConfigButton = target.closest('.flow-config-button') !== null
 
-      // Don't close if clicking on toolbar or toolbar buttons
-      if (isToolbar || isToolbarButton) {
+      // Don't close if clicking on toolbar, toolbar buttons, or flow config button
+      if (isToolbar || isToolbarButton || isFlowConfigButton) {
         return
       }
 
@@ -478,9 +530,10 @@ export default function NodePopupMenu({
       document.removeEventListener('click', handleClickOutside, true)
       document.removeEventListener('keydown', handleEscape)
     }
-  }, [onClose, node.id])
+  }, [onClose, node?.id])
 
   const handleParamChange = (paramName: string, value: any) => {
+    if (!node) return
     const updatedParams = { ...params, [paramName]: value }
     setParams(updatedParams)
 
@@ -490,6 +543,7 @@ export default function NodePopupMenu({
   }
 
   const handleOutputValueChange = (value: any) => {
+    if (!node) return
     const updatedParams = { ...params, value }
     setParams(updatedParams)
 
@@ -557,20 +611,22 @@ export default function NodePopupMenu({
         onMouseDown={handleHeaderMouseDown}
         style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       >
-        <span className="node-popup-menu-title" title={(() => {
+        <span className="node-popup-menu-title" title={title || (() => {
+          if (isFlowConfig) return 'Flow Configuration'
           // For output nodes, show the node's label instead of parent module name
-          if (isBranchingOutputNodeType(nodeType)) {
-            return node.data?.label || 'Output'
+          if (nodeType && isBranchingOutputNodeType(nodeType)) {
+            return node?.data?.label || 'Output'
           }
-          return module?.name || node.data.moduleName || nodeType || 'Node'
+          return module?.name || node?.data?.moduleName || nodeType || 'Node'
         })()}>
-          {(() => {
+          {title || (() => {
+            if (isFlowConfig) return 'Flow Configuration'
             // For output nodes, show the node's label instead of parent module name
             let displayName: string
-            if (isBranchingOutputNodeType(nodeType)) {
-              displayName = node.data?.label || 'Output'
+            if (nodeType && isBranchingOutputNodeType(nodeType)) {
+              displayName = node?.data?.label || 'Output'
             } else {
-              displayName = module?.name || node.data.moduleName || nodeType || 'Node'
+              displayName = module?.name || node?.data?.moduleName || nodeType || 'Node'
             }
             // Show up to 3 words fully, then truncate with ellipsis
             const words = displayName.split(' ')
@@ -663,7 +719,7 @@ export default function NodePopupMenu({
               )}
             </div>
           )}
-          {onDeleteNode && (() => {
+          {!isFlowConfig && onDeleteNode && node && (() => {
             const nodeType = node.data?.nodeType as NodeType | undefined
             // Don't show delete button for output nodes that cannot be deleted (using config)
             if (nodeType && isBranchingOutputNodeType(nodeType)) {
@@ -678,7 +734,7 @@ export default function NodePopupMenu({
                 type="button"
                 className="node-popup-menu-delete"
                 onClick={() => {
-                  if (onDeleteNode) {
+                  if (onDeleteNode && node) {
                     onDeleteNode(node.id)
                   }
                   onClose()
@@ -724,9 +780,118 @@ export default function NodePopupMenu({
         </div>
       </div>
       <div className="node-popup-menu-content" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        {/* Flow Config Menu */}
+        {isFlowConfig && (
+          <div style={{ padding: '1rem' }}>
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '0.5rem',
+                color: 'rgba(226, 232, 240, 0.9)',
+                fontSize: '0.875rem',
+                fontWeight: 500
+              }}>
+                Description
+              </label>
+              <textarea
+                value={metadata.description}
+                onChange={(e) => {
+                  const updated = { ...metadata, description: e.target.value }
+                  setMetadata(updated)
+                  if (onFlowMetadataUpdate) {
+                    onFlowMetadataUpdate(updated)
+                  }
+                }}
+                placeholder="Enter flow description..."
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid rgba(148, 163, 184, 0.7)',
+                  borderRadius: '4px',
+                  background: 'rgba(15, 23, 42, 0.9)',
+                  color: '#e5e7eb',
+                  fontSize: '0.875rem',
+                  minHeight: '60px',
+                  resize: 'vertical',
+                  fontFamily: 'inherit',
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '0.5rem',
+                color: 'rgba(226, 232, 240, 0.9)',
+                fontSize: '0.875rem',
+                fontWeight: 500
+              }}>
+                User Initial Timeout (ms)
+              </label>
+              <input
+                type="number"
+                value={metadata.userInitialTimeout}
+                onChange={(e) => {
+                  const updated = { ...metadata, userInitialTimeout: parseFloat(e.target.value) || 0 }
+                  setMetadata(updated)
+                  if (onFlowMetadataUpdate) {
+                    onFlowMetadataUpdate(updated)
+                  }
+                }}
+                min="0"
+                step="100"
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid rgba(148, 163, 184, 0.7)',
+                  borderRadius: '4px',
+                  background: 'rgba(15, 23, 42, 0.9)',
+                  color: '#e5e7eb',
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '0.5rem',
+                color: 'rgba(226, 232, 240, 0.9)',
+                fontSize: '0.875rem',
+                fontWeight: 500
+              }}>
+                Voice
+              </label>
+              <select
+                value={metadata.voice}
+                onChange={(e) => {
+                  const updated = { ...metadata, voice: e.target.value }
+                  setMetadata(updated)
+                  if (onFlowMetadataUpdate) {
+                    onFlowMetadataUpdate(updated)
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid rgba(148, 163, 184, 0.7)',
+                  borderRadius: '4px',
+                  background: 'rgba(15, 23, 42, 0.9)',
+                  color: '#e5e7eb',
+                }}
+              >
+                {PLACEHOLDER_VOICES.map((voice) => (
+                  <option key={voice} value={voice}>
+                    {voice}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+
         {/* Single Node Menu - Show all params */}
-        {!isBranchingNodeType(nodeType) && !isBranchingOutputNodeType(nodeType) && module && (
-          <div style={{ padding: '0.75rem' }}>
+        {!isFlowConfig && nodeType && !isBranchingNodeType(nodeType) && !isBranchingOutputNodeType(nodeType) && module && (
+          <div style={{ padding: '1rem' }}>
             {module.params.map((param) => {
               const defaultValue = getDefaultValue(param.type)
               // Default to obligatory if not specified (backwards compatibility)
@@ -767,8 +932,8 @@ export default function NodePopupMenu({
         )}
 
         {/* Branching Node Menu - Show params only (output count determined by config) */}
-        {isBranchingNodeType(nodeType) && module && (
-          <div style={{ padding: '0.75rem' }}>
+        {!isFlowConfig && nodeType && isBranchingNodeType(nodeType) && module && (
+          <div style={{ padding: '1rem' }}>
             {/* Show module params - hide listParam if it's used for outputs */}
             {module.params.map((param) => {
               // Skip listParam if it's used for outputs
@@ -813,7 +978,7 @@ export default function NodePopupMenu({
               <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(148, 163, 184, 0.2)' }}>
                 <button
                   type="button"
-                  onClick={() => onAddOutput(node.id)}
+                  onClick={() => node && onAddOutput && onAddOutput(node.id)}
                   style={{
                     width: '100%',
                     padding: '0.5rem',
@@ -848,7 +1013,7 @@ export default function NodePopupMenu({
         )}
 
         {/* Branching Output Node Menu - only show for listParam type, not internal */}
-        {isBranchingOutputNodeType(nodeType) && module && module.outputConfig && module.outputConfig.type === 'listParam' && (() => {
+        {!isFlowConfig && nodeType && isBranchingOutputNodeType(nodeType) && node && module && module.outputConfig && module.outputConfig.type === 'listParam' && (() => {
           // Use node config to check if autogenerated instead of hardcoding
           const nodeConfig = nodeConfigs[nodeType]
           const isAutogenerated = nodeConfig?.isModuleType === false
