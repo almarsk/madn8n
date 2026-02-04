@@ -8,9 +8,9 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
     - main menu
     - two way conversion between reactflow and maddie json
 - features
-    - undo/redo
     - text editor
     - validation params
+    - search bar in tool bar
 
 - maintenance
     - refactoring

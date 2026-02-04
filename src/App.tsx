@@ -1,8 +1,9 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, useEffect } from 'react'
 import { ReactFlowInstance, useEdgesState, useNodesState, type Node } from 'reactflow'
 import './App.css'
 import modules, { type Module } from './modules'
 import nodeConfigs, { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES } from './nodeConfigs'
+import { useHistory } from './hooks/useHistory'
 
 // Helper to parse Pythonic type notation (e.g., "list[str]", "dict", "list[number]")
 const parseType = (typeStr: string | undefined): { base: string; inner?: string } => {
@@ -219,7 +220,7 @@ const createBranchingNodeWithOutputs = (
     let outputParams: Record<string, any> = {}
 
     if (module?.outputConfig) {
-      if (module.outputConfig.type === 'listParam' && module.outputConfig.listParamName) {
+      if (module.outputConfig.type === 'listParam') {
         // For listParam type, we'll initialize the param but label stays default for now
         // The actual value will come from the menu
         const listParam = module.params[module.outputConfig.listParamName]
@@ -279,11 +280,47 @@ function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
-  const { isValidConnection, onConnectStart, onConnectEnd, onConnect } = useConnectionHandlers({
+  const history = useHistory()
+
+  const { isValidConnection, onConnectStart, onConnectEnd, onConnect: onConnectOriginal } = useConnectionHandlers({
     edges,
     setEdges,
     setNodes,
   })
+
+  // Helper to save history before state changes
+  const saveHistoryBeforeChange = useCallback(() => {
+    if (!isLocked) {
+      history.saveState(nodes, edges)
+    }
+  }, [nodes, edges, history, isLocked])
+
+  // Wrap onConnect to save history before adding edge
+  const onConnect = useCallback(
+    (params: any) => {
+      if (!isLocked) {
+        saveHistoryBeforeChange()
+      }
+      onConnectOriginal(params)
+    },
+    [onConnectOriginal, saveHistoryBeforeChange, isLocked]
+  )
+
+  // Debounce timer for position changes
+  const positionChangeTimerRef = useRef<number | null>(null)
+
+  // Save history for position changes (debounced)
+  const saveHistoryForPositionChange = useCallback(() => {
+    if (positionChangeTimerRef.current) {
+      clearTimeout(positionChangeTimerRef.current)
+    }
+    positionChangeTimerRef.current = window.setTimeout(() => {
+      if (!isLocked) {
+        // Save current state after position change (debounced)
+        history.saveState(nodes, edges)
+      }
+    }, 300) // 300ms debounce
+  }, [nodes, edges, history, isLocked])
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault()
@@ -320,13 +357,16 @@ function App() {
         return
       }
 
+      // Save history before adding nodes
+      saveHistoryBeforeChange()
+
       // Create node(s) based on config type
       if (isBranchingNodeType(module.type)) {
         const branchingConfig = nodeConfigs.branching
         // For internal type, use the fixed output count from module config
         // For listParam type, use default from nodeConfig
         let outputCount = branchingConfig?.defaultOutputCount ?? 1
-        if (module.outputConfig?.type === 'internal' && module.outputConfig.outputCount !== undefined) {
+        if (module.outputConfig?.type === 'internal') {
           outputCount = module.outputConfig.outputCount
         }
         const nodes = createBranchingNodeWithOutputs(position, outputCount, module.name)
@@ -438,13 +478,18 @@ function App() {
           return nds
         }
 
+        // Save history before adding nodes
+        if (!isLocked) {
+          saveHistoryBeforeChange()
+        }
+
         // Create node(s) based on config type
         if (isBranchingNodeType(module.type)) {
           const branchingConfig = nodeConfigs.branching
           // For internal type, use the fixed output count from module config
           // For listParam type, use default from nodeConfig
           let outputCount = branchingConfig?.defaultOutputCount ?? 1
-          if (module.outputConfig?.type === 'internal' && module.outputConfig.outputCount !== undefined) {
+          if (module.outputConfig?.type === 'internal') {
             outputCount = module.outputConfig.outputCount
           }
           const nodes = createBranchingNodeWithOutputs(finalPosition, outputCount, module.name)
@@ -501,12 +546,17 @@ function App() {
     [nodes.length]
   )
 
-  // Wrap onEdgesChange to maintain compatibility
+  // Wrap onEdgesChange to maintain compatibility and save history
   const handleEdgesChange = useCallback(
     (changes: any[]) => {
+      // Save history for non-select changes
+      const hasNonSelectChanges = changes.some((change) => change.type !== 'select')
+      if (hasNonSelectChanges && !isLocked) {
+        saveHistoryBeforeChange()
+      }
       onEdgesChange(changes)
     },
-    [onEdgesChange]
+    [onEdgesChange, saveHistoryBeforeChange, isLocked]
   )
 
   // Wrap onNodesChange to clean up output nodes when branching node is deleted
@@ -516,6 +566,8 @@ function App() {
       const removedBranchingNodeIds = new Set<string>()
       const movedBranchingNodeIds = new Set<string>()
       const selectedOutputNodeIds = new Set<string>()
+      const hasPositionChanges = changes.some((change) => change.type === 'position')
+      const hasNonPositionChanges = changes.some((change) => change.type !== 'position' && change.type !== 'select')
 
       changes.forEach((change) => {
         if (change.type === 'remove') {
@@ -539,6 +591,15 @@ function App() {
           }
         }
       })
+
+      // Save history for non-position changes immediately
+      if (hasNonPositionChanges && !isLocked) {
+        saveHistoryBeforeChange()
+      }
+      // For position changes, use debounced save
+      if (hasPositionChanges && !hasNonPositionChanges && !isLocked) {
+        saveHistoryForPositionChange()
+      }
 
       // If an output node is being selected, deselect its parent branching node
       if (selectedOutputNodeIds.size > 0) {
@@ -634,6 +695,10 @@ function App() {
   }, [])
 
   const handleNodeDataUpdate = useCallback((nodeId: string, updatedData: any) => {
+    // Save history before updating node data
+    if (!isLocked) {
+      saveHistoryBeforeChange()
+    }
     setNodes((nds) => {
       return nds.map((node) => {
         if (node.id === nodeId) {
@@ -657,7 +722,7 @@ function App() {
         return node
       })
     })
-  }, [setNodes])
+  }, [setNodes, saveHistoryBeforeChange, isLocked])
 
   const handleExportJson = useCallback(() => {
     if (!reactFlowInstance) {
@@ -743,6 +808,66 @@ function App() {
     setValidationStatus({ isValid: null, message: '' })
   }, [])
 
+  // Undo/Redo handlers
+  const handleUndo = useCallback(() => {
+    if (!history.canUndo || isLocked) return
+
+    const previousState = history.undo()
+    if (previousState) {
+      // Preserve openMenuNodeId if the node still exists after undo
+      const currentNodeStillExists = previousState.nodes.some((n) => n.id === openMenuNodeId)
+      if (!currentNodeStillExists) {
+        setOpenMenuNodeId(null)
+      }
+
+      setNodes(previousState.nodes)
+      setEdges(previousState.edges)
+    }
+  }, [history, isLocked, setNodes, setEdges, openMenuNodeId])
+
+  const handleRedo = useCallback(() => {
+    if (!history.canRedo || isLocked) return
+
+    const nextState = history.redo()
+    if (nextState) {
+      // Preserve openMenuNodeId if the node still exists after redo
+      const currentNodeStillExists = nextState.nodes.some((n) => n.id === openMenuNodeId)
+      if (!currentNodeStillExists) {
+        setOpenMenuNodeId(null)
+      }
+
+      setNodes(nextState.nodes)
+      setEdges(nextState.edges)
+    }
+  }, [history, isLocked, setNodes, setEdges, openMenuNodeId])
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input field
+      const target = event.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return
+      }
+
+      // Check for Ctrl+Z (or Cmd+Z on Mac) for undo
+      if ((event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        handleUndo()
+      }
+      // Check for Ctrl+Shift+Z or Ctrl+Y (or Cmd+Shift+Z/Cmd+Y on Mac) for redo
+      else if ((event.ctrlKey || event.metaKey) && (event.key === 'Z' || event.key === 'y' || event.key === 'Y')) {
+        event.preventDefault()
+        handleRedo()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [handleUndo, handleRedo])
+
   const handleOutputCountChange = useCallback((nodeId: string, count: number) => {
     // Find the node and check if it's internal type (output count is fixed)
     const node = nodes.find((n) => n.id === nodeId)
@@ -754,6 +879,9 @@ function App() {
       }
     }
 
+    if (!isLocked) {
+      saveHistoryBeforeChange()
+    }
     setNodes((nds) => {
       // Update the branching node's output count
       const updatedNodes = nds.map((node) => {
@@ -926,7 +1054,7 @@ function App() {
       if (!branchingNode) return nds
 
       const module = branchingNode.data?.moduleName ? modules.find((m) => m.name === branchingNode.data.moduleName) : undefined
-      if (!module?.outputConfig || module.outputConfig.type !== 'listParam' || !module.outputConfig.listParamName) {
+      if (!module?.outputConfig || module.outputConfig.type !== 'listParam') {
         return nds
       }
 
@@ -1020,7 +1148,7 @@ function App() {
 
       return [...finalNodes, outputNode]
     })
-  }, [setNodes])
+  }, [setNodes, saveHistoryBeforeChange, isLocked])
 
   // Update nodes with label click handler, make output nodes non-draggable, and set zIndex for proper layering
   // zIndex values come from nodeConfigs
@@ -1062,6 +1190,10 @@ function App() {
           onMinimapToggle={() => setShowMinimap((prev) => !prev)}
           onExportJson={handleExportJson}
           onValidate={handleValidate}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          canUndo={history.canUndo}
+          canRedo={history.canRedo}
         />
 
         <FlowCanvas

@@ -16,6 +16,10 @@ interface ToolbarProps {
   onMinimapToggle: () => void
   onExportJson: () => void
   onValidate: () => void
+  onUndo: () => void
+  onRedo: () => void
+  canUndo: boolean
+  canRedo: boolean
 }
 
 export default function Toolbar({
@@ -31,6 +35,10 @@ export default function Toolbar({
   onMinimapToggle,
   onExportJson,
   onValidate,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }: ToolbarProps) {
   const [toolbarPosition, setToolbarPosition] = useState({ x: 16, y: 16 })
   const [toolbarSize, setToolbarSize] = useState({ width: 280, height: 260 })
@@ -203,6 +211,32 @@ export default function Toolbar({
                 title="Validate flow"
               >
                 ✓
+              </button>
+              <button
+                type="button"
+                className="toolbar-nav-button"
+                onClick={onUndo}
+                disabled={!canUndo}
+                title="Undo (Ctrl+Z)"
+                style={{
+                  opacity: canUndo ? 1 : 0.5,
+                  cursor: canUndo ? 'pointer' : 'not-allowed',
+                }}
+              >
+                ↶
+              </button>
+              <button
+                type="button"
+                className="toolbar-nav-button"
+                onClick={onRedo}
+                disabled={!canRedo}
+                title="Redo (Ctrl+Shift+Z)"
+                style={{
+                  opacity: canRedo ? 1 : 0.5,
+                  cursor: canRedo ? 'pointer' : 'not-allowed',
+                }}
+              >
+                ↷
               </button>
             </div>
           </section>

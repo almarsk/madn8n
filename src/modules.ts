@@ -9,15 +9,16 @@ export interface Param {
     type?: string // Optional type hint for UI rendering, but params can be any value
 }
 
-export type OutputConfigType = 'listParam' | 'internal'
-
-export interface OutputConfig {
-    type: OutputConfigType
-    // For listParam type, REQUIRED: specify which param contains the list
-    listParamName?: string
-    // For internal type, REQUIRED: specify the fixed number of outputs
-    outputCount?: number
-}
+// Discriminated union for type-safe output configuration
+export type OutputConfig =
+    | {
+        type: 'listParam'
+        listParamName: string // REQUIRED for listParam type
+    }
+    | {
+        type: 'internal'
+        outputCount: number // REQUIRED for internal type
+    }
 
 export interface Module {
     name: string
@@ -26,10 +27,6 @@ export interface Module {
     params: Record<string, Param>
     // Name of the param that should be used as the node label (must be a primitive type)
     labelParam?: string
-    outputCountConfig?: {
-        min: number
-        max?: number
-    }
     // Output configuration for branching nodes
     outputConfig?: OutputConfig
 }
@@ -46,9 +43,6 @@ const modules: Module[] = [
             }
         },
         "labelParam": undefined,
-        "outputCountConfig": {
-            "min": 0
-        },
         "outputConfig": {
             "type": "listParam",
             "listParamName": "outputs"
@@ -60,9 +54,6 @@ const modules: Module[] = [
         "description": "Branching node that contains output nodes",
         "params": {},
         "labelParam": undefined,
-        "outputCountConfig": {
-            "min": 0
-        },
         "outputConfig": {
             "type": "internal",
             "outputCount": 2
@@ -75,6 +66,10 @@ const modules: Module[] = [
         "params": {
             "what": {
                 "name": "what",
+                "type": "string"
+            },
+            "how": {
+                "name": "how",
                 "type": "string"
             }
         },

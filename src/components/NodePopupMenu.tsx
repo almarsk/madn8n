@@ -395,7 +395,7 @@ export default function NodePopupMenu({
         {/* Branching Output Node Menu */}
         {isBranchingOutputNodeType(nodeType) && module && module.outputConfig && (
           <div style={{ padding: '0.75rem' }}>
-            {module.outputConfig.type === 'listParam' && module.outputConfig.listParamName ? (
+            {module.outputConfig.type === 'listParam' ? (
               (() => {
                 const listParam = module.params[module.outputConfig.listParamName]
                 if (listParam) {
