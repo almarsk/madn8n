@@ -1,8 +1,8 @@
 .node-popup-menu {
   position: absolute;
   z-index: 1000;
-  min-width: 200px;
-  max-width: 400px;
+  min-width: 280px;
+  max-width: 450px;
   border-radius: 0.75rem;
   border: 1px solid rgba(148, 163, 184, 0.4);
   background: radial-gradient(circle at top left, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.95));
@@ -22,6 +22,8 @@
   padding: 0.5rem 0.75rem;
   background: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.9));
   border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  user-select: none;
+  gap: 0.5rem;
 }
 
 .node-popup-menu-title {
@@ -29,6 +31,11 @@
   font-weight: 500;
   color: rgba(226, 232, 240, 0.95);
   user-select: none;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .node-popup-menu-close {
@@ -60,6 +67,40 @@
 .node-popup-menu-content {
   padding: 0;
   min-height: 40px;
+}
+
+.node-popup-menu-content::-webkit-scrollbar {
+  display: none;
+}
+
+.node-popup-menu-resize-handle {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.8);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.8));
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.9),
+    0 0 0 1px rgba(15, 23, 42, 0.9);
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.node-popup-menu-resize-handle::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  border-right: 2px solid rgba(148, 163, 184, 0.9);
+  border-bottom: 2px solid rgba(148, 163, 184, 0.9);
+  transform: translate(1px, 1px);
+  opacity: 0.9;
 }
 
 /* Remove default arrows from number input */

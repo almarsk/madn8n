@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps, useReactFlow } from 'reactflow'
-import nodeConfigs, { type NodeConfig, type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES } from './nodeConfigs'
+import nodeConfigs, { type NodeConfig, type NodeType, isBranchingNodeType, isBranchingOutputNodeType, canOutputNodeBeDeleted, NODE_TYPES } from './nodeConfigs'
 import { useCallback } from 'react'
 
 interface NodeFactoryData extends NodeConfig {
@@ -26,7 +26,7 @@ function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
     // Get node configuration
     const nodeType = data.nodeType || NODE_TYPES.SINGLE
     const config = nodeConfigs[nodeType]
-    
+
     if (!config) {
         console.warn(`Unknown node type: ${nodeType}`)
         return null
@@ -38,39 +38,37 @@ function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
     // Show target handles visibly when dragging a connection (and this is not the source node)
     const showTargetHandlesVisible = isDraggingConnection && !isSourceNode && config.hasTargetHandles
 
-    const handleLabelClick = (e: React.MouseEvent) => {
+    const handleMenuIconClick = (e: React.MouseEvent) => {
         e.stopPropagation()
+        e.preventDefault()
         if (data.onLabelClick) {
             data.onLabelClick(id)
         }
     }
 
-    // For branching output nodes, make the entire node clickable
-    // Also ensure only this node is selected, not the parent branching node
+    // For branching output nodes, clicking the node itself should select it
+    // But menu only opens via the three dots icon
     const handleNodeClick = useCallback((e: React.MouseEvent) => {
         if (isBranchingOutputNodeType(nodeType)) {
             e.stopPropagation()
-            
-            // Explicitly select only this node and deselect parent if it exists
-            if (data.parentNodeId) {
-                setNodes((nds) => {
-                    return nds.map((node) => {
-                        if (node.id === data.parentNodeId) {
-                            return { ...node, selected: false }
-                        }
-                        if (node.id === id) {
-                            return { ...node, selected: true }
-                        }
-                        return node
-                    })
+
+            // Explicitly select only this node and deselect parent and all other nodes
+            setNodes((nds) => {
+                return nds.map((node) => {
+                    // Deselect parent if it exists
+                    if (data.parentNodeId && node.id === data.parentNodeId) {
+                        return { ...node, selected: false }
+                    }
+                    // Select the clicked output node
+                    if (node.id === id) {
+                        return { ...node, selected: true }
+                    }
+                    // Deselect all other nodes
+                    return { ...node, selected: false }
                 })
-            }
-            
-            if (data.onLabelClick) {
-                data.onLabelClick(id)
-            }
+            })
         }
-    }, [nodeType, data.parentNodeId, data.onLabelClick, id, setNodes])
+    }, [nodeType, data.parentNodeId, id, setNodes])
 
     // Determine if source handles should be shown
     // For single nodes: only show if not connected yet
@@ -87,18 +85,46 @@ function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
     // Determine cursor style
     const cursorStyle = hasOutgoingEdge ? 'default' : 'grab'
 
+    // For branching nodes, prevent clicks on the container from selecting the node
+    // Only the header should be clickable for selection (but not menu opening - that's only via three dots)
+    const handleBranchingNodeMouseDown = (e: React.MouseEvent) => {
+        // Only allow clicks on the header to select the node
+        // If click is not on the header, prevent selection
+        const target = e.target as HTMLElement
+        const isClickOnHeader = target.closest('.branching-node-header') !== null
+        const isClickOnMenuIcon = target.closest('.dynamic-node-label-menu-icon') !== null
+        
+        // Allow menu icon clicks to work
+        if (isClickOnMenuIcon) {
+            return
+        }
+        
+        if (!isClickOnHeader) {
+            e.stopPropagation()
+            e.preventDefault()
+        }
+    }
+
     return (
         <div
             className={nodeClasses}
             style={{ cursor: cursorStyle }}
             onClick={isBranchingOutputNodeType(nodeType) ? handleNodeClick : undefined}
+            onMouseDown={isBranchingNodeType(nodeType) ? handleBranchingNodeMouseDown : undefined}
         >
             <div
                 className={`dynamic-node-label ${isBranchingNodeType(nodeType) ? 'branching-node-header' : ''}`}
-                onClick={handleLabelClick}
             >
                 <span>{data.label}</span>
-                <span className="dynamic-node-label-menu-icon">⋮</span>
+                {/* Hide menu icon for output nodes that cannot be deleted */}
+                {!(isBranchingOutputNodeType(nodeType) && !canOutputNodeBeDeleted(nodeType)) && (
+                    <span 
+                        className="dynamic-node-label-menu-icon"
+                        onClick={handleMenuIconClick}
+                    >
+                        ⋮
+                    </span>
+                )}
             </div>
 
             {/* Target handles - render if config allows */}

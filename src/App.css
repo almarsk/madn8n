@@ -72,7 +72,6 @@
   transform-origin: top left;
   display: flex;
   flex-direction: column;
-  transition: width 0.15s ease-out, height 0.15s ease-out;
 }
 
 .nodes-toolbar--minimized {
@@ -146,10 +145,11 @@
   flex-direction: column;
   gap: 0.5rem;
   flex: 1;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
+  /* No scrollbar on toolbar body */
   min-width: 0;
   min-height: 0;
+  box-sizing: border-box;
 }
 
 .nodes-toolbar-section {
@@ -159,6 +159,10 @@
   border: 1px solid rgba(30, 64, 175, 0.45);
   flex-shrink: 0;
   min-width: fit-content;
+}
+
+.nodes-toolbar-section:first-child {
+  padding-bottom: 0.3rem;
 }
 
 .nodes-toolbar-section-title {
@@ -230,34 +234,23 @@
   max-height: none;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-right: 0;
   min-width: fit-content;
+  /* Hide scrollbar but allow scrolling */
+  scrollbar-width: none;
+  /* Firefox */
+  -ms-overflow-style: none;
+  /* IE and Edge */
 }
 
-.nodes-list::-webkit-scrollbar,
-.nodes-toolbar-body::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.nodes-list::-webkit-scrollbar {
+  display: none;
+  /* Chrome, Safari, Opera */
 }
 
-.nodes-list::-webkit-scrollbar-track,
-.nodes-toolbar-body::-webkit-scrollbar-track {
-  background: transparent;
-  margin: 2px;
-}
-
-.nodes-list::-webkit-scrollbar-thumb,
-.nodes-toolbar-body::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3);
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background-clip: padding-box;
-}
-
-.nodes-list::-webkit-scrollbar-thumb:hover,
-.nodes-toolbar-body::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.5);
-  background-clip: padding-box;
+/* Hide scrollbar for nodes-list-wrapper */
+.nodes-list-wrapper::-webkit-scrollbar {
+  display: none;
+  /* Chrome, Safari, Opera */
 }
 
 /* Overlay scrollbar for Firefox - thin and transparent track */
@@ -433,6 +426,7 @@
 .branching-node-output {
   border-color: rgba(96, 165, 250, 0.4);
   background: rgba(30, 41, 59, 0.95);
+  transition: none !important; /* Prevent wiggling - output nodes should stick to parent */
 }
 
 .dynamic-node:active {
@@ -445,7 +439,7 @@
   font-size: 13px;
   font-weight: 500;
   text-align: center;
-  cursor: pointer;
+  cursor: default;
   user-select: text;
   pointer-events: all;
   display: flex;
@@ -454,10 +448,10 @@
   gap: 6px;
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
-.dynamic-node-label > span:first-child {
+.dynamic-node-label>span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -471,14 +465,31 @@
   line-height: 1;
   color: rgba(148, 163, 184, 0.6);
   opacity: 0.7;
-  transition: opacity 0.2s ease, color 0.2s ease;
+  transition: all 120ms ease;
   user-select: none;
-  pointer-events: none;
+  pointer-events: all;
+  cursor: pointer;
+  padding: 4px;
+  margin: -4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: transparent;
+  position: relative;
+  z-index: 1;
 }
 
-.dynamic-node-label:hover .dynamic-node-label-menu-icon {
+.dynamic-node-label-menu-icon:hover {
   opacity: 1;
   color: rgba(148, 163, 184, 0.9);
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.dynamic-node-label-menu-icon:active {
+  background: rgba(148, 163, 184, 0.3);
 }
 
 .react-flow__resize-control {

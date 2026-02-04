@@ -85,8 +85,34 @@ function Minimap({ nodes, edges, reactFlowInstance, viewport, reactFlowWrapper }
     }
   }, [nodes, viewport, reactFlowWrapper])
 
-  if (!bounds || !viewportRect) {
+  if (!bounds || !viewportRect || nodes.length === 0) {
     return null
+  }
+
+  const handleMinimapClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (nodes.length === 0) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    // Convert minimap coordinates to flow coordinates
+    const flowX = (x - PADDING) / scale + bounds.minX
+    const flowY = (y - PADDING) / scale + bounds.minY
+
+    // Center the viewport on the clicked position
+    const wrapperBounds = reactFlowWrapper.current?.getBoundingClientRect()
+    if (wrapperBounds) {
+      const viewportWidth = wrapperBounds.width / viewport.zoom
+      const viewportHeight = wrapperBounds.height / viewport.zoom
+      const newX = -flowX * viewport.zoom + viewportWidth / 2
+      const newY = -flowY * viewport.zoom + viewportHeight / 2
+      reactFlowInstance.setViewport({ x: newX, y: newY, zoom: viewport.zoom })
+    }
   }
 
   return (
@@ -94,7 +120,14 @@ function Minimap({ nodes, edges, reactFlowInstance, viewport, reactFlowWrapper }
       <svg
         width={MINIMAP_SIZE}
         height={MINIMAP_HEIGHT}
-        style={{ display: 'block' }}
+        style={{ display: 'block', cursor: nodes.length === 0 ? 'default' : 'pointer' }}
+        onClick={handleMinimapClick}
+        onMouseDown={(e) => {
+          if (nodes.length === 0) {
+            e.preventDefault()
+            e.stopPropagation()
+          }
+        }}
       >
         {/* Background */}
         <rect

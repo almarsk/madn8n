@@ -1,27 +1,15 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
 import { ReactFlowInstance, useEdgesState, useNodesState, type Node } from 'reactflow'
 import './App.css'
-import modules, { type Module } from './modules'
-import nodeConfigs, { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES } from './nodeConfigs'
+import modules from './modules'
+import nodeConfigs, { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES, canOutputNodeBeDeleted } from './nodeConfigs'
 import { useHistory } from './hooks/useHistory'
-
-// Helper to parse Pythonic type notation (e.g., "list[str]", "dict", "list[number]")
-const parseType = (typeStr: string | undefined): { base: string; inner?: string } => {
-  if (!typeStr) return { base: 'string' }
-
-  // Match list[type] or dict[type]
-  const listMatch = typeStr.match(/^list\[(.+)\]$/)
-  if (listMatch) {
-    return { base: 'list', inner: listMatch[1] }
-  }
-
-  const dictMatch = typeStr.match(/^dict(?:\[(.+)\])?$/)
-  if (dictMatch) {
-    return { base: 'dict', inner: dictMatch[1] }
-  }
-
-  return { base: typeStr }
-}
+import { createNodeFromConfig, createBranchingNodeWithOutputs } from './utils/nodeCreation'
+import { getNodeLabel } from './utils/nodeUtils'
+import { useValidation } from './hooks/useValidation'
+import { getBranchingLayoutConstants, calculateOutputNodePosition, repositionOutputNodes } from './utils/branchingNodeHelpers'
+import { exportFlowToJson } from './utils/exportHelpers'
+import { getDefaultValueForParamType } from './utils/branchingNodeOperations'
 
 import Toolbar from './components/Toolbar'
 import FlowCanvas from './components/FlowCanvas'
@@ -33,238 +21,6 @@ import { useConnectionHandlers } from './hooks/useConnectionHandlers'
 const initialNodes: Node[] = []
 const initialEdges: any[] = []
 
-const getId = (() => {
-  let id = 0
-  return () => `node_${id++}`
-})()
-
-// Helper function to get node label from module config and node data
-const getNodeLabel = (module: Module | undefined, nodeData: any, nodeType?: NodeType): string => {
-  if (!module) {
-    return nodeData?.label || 'Unknown'
-  }
-
-  // For branching output nodes, use the value param directly
-  if (nodeType === NODE_TYPES.BRANCHING_OUTPUT) {
-    if (nodeData?.params?.value !== undefined && nodeData.params.value !== null && nodeData.params.value !== '') {
-      return String(nodeData.params.value)
-    }
-    return nodeData?.label || 'Output'
-  }
-
-  // If module has a labelParam, use that param's value
-  if (module.labelParam && nodeData?.params && nodeData.params[module.labelParam] !== undefined) {
-    const paramValue = nodeData.params[module.labelParam]
-    // Convert to string for display
-    if (paramValue !== null && paramValue !== undefined && paramValue !== '') {
-      return String(paramValue)
-    }
-  }
-
-  // Fallback to module name
-  return module.name
-}
-
-// Helper function to create a node based on nodeConfig
-const createNodeFromConfig = (
-  nodeType: NodeType,
-  position: { x: number; y: number },
-  options: {
-    moduleName?: string
-    label?: string
-    outputCount?: number
-    parentNodeId?: string
-    connectingFrom?: string | null
-    params?: Record<string, any>
-  } = {}
-): Node => {
-  const config = nodeConfigs[nodeType]
-  if (!config) {
-    throw new Error(`Unknown node type: ${nodeType}`)
-  }
-
-  const module = options.moduleName ? modules.find((m) => m.name === options.moduleName) : undefined
-
-  // Initialize params from module if provided
-  const initialParams: Record<string, any> = {}
-  if (module) {
-    Object.keys(module.params).forEach((paramName) => {
-      const param = module.params[paramName]
-      // Set default value based on type
-      if (param.type === 'number') {
-        initialParams[paramName] = 0
-      } else if (param.type === 'boolean') {
-        initialParams[paramName] = false
-      } else {
-        const { base } = parseType(param.type)
-        if (base === 'list') {
-          initialParams[paramName] = []
-        } else if (base === 'dict') {
-          initialParams[paramName] = {}
-        } else {
-          initialParams[paramName] = ''
-        }
-      }
-    })
-  }
-
-  // Merge with provided params
-  const nodeParams = { ...initialParams, ...(options.params || {}) }
-
-  // Calculate label
-  const nodeData: any = {
-    ...config,
-    nodeType,
-    connectingFrom: options.connectingFrom ?? null,
-    moduleName: options.moduleName,
-    params: nodeParams,
-    ...(options.outputCount !== undefined && { outputCount: options.outputCount }),
-    ...(options.parentNodeId && { parentNodeId: options.parentNodeId }),
-  }
-
-  // Set label using helper function
-  nodeData.label = getNodeLabel(module, nodeData, nodeType)
-
-  const node: Node = {
-    id: getId(),
-    type: 'nodeFactory',
-    position,
-    data: nodeData,
-    style: {
-      width: config.defaultWidth ?? 150,
-      height: config.defaultHeight ?? 80,
-    },
-    zIndex: config.zIndex ?? 2,
-  }
-
-  return node
-}
-
-// Helper function to create a branching node with its output nodes
-const createBranchingNodeWithOutputs = (
-  position: { x: number; y: number },
-  outputCount: number,
-  moduleName?: string
-): Node[] => {
-  const branchingConfig = nodeConfigs.branching
-  const outputConfig = nodeConfigs.branchingOutput
-
-  if (!branchingConfig || !outputConfig) {
-    throw new Error('Branching or output config not found')
-  }
-
-  const module = moduleName ? modules.find((m) => m.name === moduleName) : undefined
-
-  const padding = branchingConfig.padding || 20
-  const headerHeight = branchingConfig.headerHeight || 50
-  const outputSpacing = branchingConfig.outputSpacing || 10
-  const outputNodeWidth = branchingConfig.outputNodeWidth || 130
-  const outputNodeHeight = branchingConfig.outputNodeHeight || 60
-
-  // Calculate branching node size based on output count
-  const branchingNodeWidth = outputNodeWidth + padding * 2
-  const branchingNodeHeight = headerHeight + outputSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding
-
-  const branchingNodeId = getId()
-
-  // Initialize params from module if provided
-  const initialParams: Record<string, any> = {}
-  if (module) {
-    Object.keys(module.params).forEach((paramName) => {
-      const param = module.params[paramName]
-      if (param.type === 'number') {
-        initialParams[paramName] = 0
-      } else if (param.type === 'boolean') {
-        initialParams[paramName] = false
-      } else {
-        const { base } = parseType(param.type)
-        if (base === 'list') {
-          initialParams[paramName] = []
-        } else if (base === 'dict') {
-          initialParams[paramName] = {}
-        } else {
-          initialParams[paramName] = ''
-        }
-      }
-    })
-  }
-
-  const branchingNodeData: any = {
-    ...branchingConfig,
-    nodeType: NODE_TYPES.BRANCHING,
-    outputCount,
-    connectingFrom: null,
-    moduleName: moduleName,
-    params: initialParams,
-  }
-
-  branchingNodeData.label = getNodeLabel(module, branchingNodeData, NODE_TYPES.BRANCHING)
-
-  const branchingNode: Node = {
-    id: branchingNodeId,
-    type: 'nodeFactory',
-    position,
-    data: branchingNodeData,
-    style: {
-      width: branchingNodeWidth,
-      height: branchingNodeHeight,
-    },
-    zIndex: branchingConfig.zIndex,
-  }
-
-  // Create output nodes
-  const outputNodes: Node[] = []
-  for (let i = 0; i < outputCount; i++) {
-    // Determine output node label based on outputConfig
-    let outputLabel = `Output ${i + 1}`
-    let outputParams: Record<string, any> = {}
-
-    if (module?.outputConfig) {
-      if (module.outputConfig.type === 'listParam') {
-        // For listParam type, we'll initialize the param but label stays default for now
-        // The actual value will come from the menu
-        const listParam = module.params[module.outputConfig.listParamName]
-        if (listParam) {
-          // Initialize based on list element type (assuming it's an array of the param type)
-          // For now, just use string as default
-          outputParams.value = ''
-        }
-      } else if (module.outputConfig.type === 'internal') {
-        // For internal type, just use default label
-        outputLabel = `Output ${i + 1}`
-      }
-    }
-
-    const outputNodeData: any = {
-      ...outputConfig,
-      nodeType: NODE_TYPES.BRANCHING_OUTPUT,
-      parentNodeId: branchingNodeId,
-      connectingFrom: null,
-      moduleName: moduleName,
-      params: outputParams,
-      label: outputLabel,
-    }
-
-    const outputNode: Node = {
-      id: getId(),
-      type: 'nodeFactory',
-      position: {
-        x: position.x + padding,
-        y: position.y + headerHeight + outputSpacing + i * (outputNodeHeight + outputSpacing),
-      },
-      data: outputNodeData,
-      style: {
-        width: outputNodeWidth,
-        height: outputNodeHeight,
-      },
-      zIndex: outputConfig.zIndex,
-    }
-    outputNodes.push(outputNode)
-  }
-
-  return [branchingNode, ...outputNodes]
-}
-
 function App() {
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
@@ -272,6 +28,7 @@ function App() {
   const [showMinimap, setShowMinimap] = useState(false)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [openMenuNodeId, setOpenMenuNodeId] = useState<string | null>(null)
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null)
   const [validationStatus, setValidationStatus] = useState<{ isValid: boolean | null; message: string }>({
     isValid: null,
     message: '',
@@ -282,18 +39,48 @@ function App() {
 
   const history = useHistory()
 
+  // Use refs to always get current state for history (avoid stale closures)
+  const nodesRef = useRef(nodes)
+  const edgesRef = useRef(edges)
+  const openMenuNodeIdRef = useRef(openMenuNodeId)
+  const menuPositionRef = useRef(menuPosition)
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    nodesRef.current = nodes
+  }, [nodes])
+  useEffect(() => {
+    edgesRef.current = edges
+  }, [edges])
+  useEffect(() => {
+    openMenuNodeIdRef.current = openMenuNodeId
+  }, [openMenuNodeId])
+  useEffect(() => {
+    menuPositionRef.current = menuPosition
+  }, [menuPosition])
+
   const { isValidConnection, onConnectStart, onConnectEnd, onConnect: onConnectOriginal } = useConnectionHandlers({
     edges,
     setEdges,
     setNodes,
   })
 
-  // Helper to save history before state changes
-  const saveHistoryBeforeChange = useCallback(() => {
-    if (!isLocked) {
-      history.saveState(nodes, edges)
+  // Helper to save history before state changes - uses refs to get current state
+  const saveHistoryBeforeChange = useCallback((changeType: 'param' | 'other' = 'other') => {
+    // Don't save history during undo/redo operations
+    if (isRestoringStateRef.current) {
+      return
     }
-  }, [nodes, edges, history, isLocked])
+    if (!isLocked) {
+      history.saveState(
+        nodesRef.current,
+        edgesRef.current,
+        openMenuNodeIdRef.current,
+        changeType,
+        menuPositionRef.current
+      )
+    }
+  }, [history, isLocked])
 
   // Wrap onConnect to save history before adding edge
   const onConnect = useCallback(
@@ -311,16 +98,21 @@ function App() {
 
   // Save history for position changes (debounced)
   const saveHistoryForPositionChange = useCallback(() => {
+    // Don't save history during undo/redo operations
+    if (isRestoringStateRef.current) {
+      return
+    }
     if (positionChangeTimerRef.current) {
       clearTimeout(positionChangeTimerRef.current)
     }
     positionChangeTimerRef.current = window.setTimeout(() => {
-      if (!isLocked) {
+      // Check again in case we're restoring during the timeout
+      if (!isLocked && !isRestoringStateRef.current) {
         // Save current state after position change (debounced)
-        history.saveState(nodes, edges)
+        history.saveState(nodes, edges, openMenuNodeId, 'other', menuPosition)
       }
     }, 300) // 300ms debounce
-  }, [nodes, edges, history, isLocked])
+  }, [nodes, edges, history, isLocked, openMenuNodeId])
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault()
@@ -362,15 +154,16 @@ function App() {
 
       // Create node(s) based on config type
       if (isBranchingNodeType(module.type)) {
-        const branchingConfig = nodeConfigs.branching
+        const branchingConfig = nodeConfigs[module.type]
         // For internal type, use the fixed output count from module config
         // For listParam type, use default from nodeConfig
         let outputCount = branchingConfig?.defaultOutputCount ?? 1
         if (module.outputConfig?.type === 'internal') {
           outputCount = module.outputConfig.outputCount
         }
-        const nodes = createBranchingNodeWithOutputs(position, outputCount, module.name)
-        setNodes((nds) => nds.concat(nodes))
+        const nodesToAdd = createBranchingNodeWithOutputs(position, outputCount, module.name, module.type as NodeType)
+        // Add all nodes at once (parent + outputs) - this is one operation
+        setNodes((nds) => nds.concat(nodesToAdd))
       } else {
         // Single node (or any other non-branching type)
         const newNode = createNodeFromConfig(module.type as NodeType, position, {
@@ -380,7 +173,7 @@ function App() {
         setNodes((nds) => nds.concat(newNode))
       }
     },
-    [reactFlowInstance, setNodes]
+    [reactFlowInstance, setNodes, saveHistoryBeforeChange, isLocked]
   )
 
   const onNodeDragStart = (type: string) => (event: React.DragEvent) => {
@@ -492,7 +285,7 @@ function App() {
           if (module.outputConfig?.type === 'internal') {
             outputCount = module.outputConfig.outputCount
           }
-          const nodes = createBranchingNodeWithOutputs(finalPosition, outputCount, module.name)
+          const nodes = createBranchingNodeWithOutputs(finalPosition, outputCount, module.name, module.type as NodeType)
           return nds.concat(nodes)
         } else {
           // Single node (or any other non-branching type)
@@ -507,7 +300,7 @@ function App() {
         return nds
       })
     },
-    [reactFlowInstance, setNodes, modules]
+    [reactFlowInstance, setNodes, modules, saveHistoryBeforeChange, isLocked]
   )
 
   const handleZoomIn = () => {
@@ -562,14 +355,51 @@ function App() {
   // Wrap onNodesChange to clean up output nodes when branching node is deleted
   const handleNodesChange = useCallback(
     (changes: any[]) => {
+      // Filter out deletions of non-deletable output nodes before processing
+      const filteredChanges = changes.filter((change) => {
+        if (change.type === 'remove') {
+          const node = nodes.find((n) => n.id === change.id)
+          const nodeType = node?.data?.nodeType as NodeType | undefined
+          // Prevent deletion of output nodes that cannot be deleted (using config)
+          if (nodeType && isBranchingOutputNodeType(nodeType)) {
+            if (!canOutputNodeBeDeleted(nodeType)) {
+              return false // Filter out deletion of non-deletable output nodes
+            }
+          }
+        }
+        return true
+      })
+
+      // Close menu when a different node starts being dragged (but not the node whose menu is open)
+      const dragStartChanges = filteredChanges.filter((change) => change.type === 'position' && change.position)
+      if (dragStartChanges.length > 0 && openMenuNodeId) {
+        const draggedNodeId = dragStartChanges[0].id
+        // Only close if a different node is being dragged
+        if (draggedNodeId !== openMenuNodeId) {
+          setOpenMenuNodeId(null)
+          setMenuPosition(null)
+        }
+      }
+
+      // Save history BEFORE processing changes (so we capture the state before deletion)
+      // But only if there are actual changes after filtering
+      const hasPositionChanges = filteredChanges.some((change) => change.type === 'position')
+      const hasNonPositionChanges = filteredChanges.some((change) => change.type !== 'position' && change.type !== 'select')
+
+      if (!isRestoringStateRef.current) {
+        if (hasNonPositionChanges && !isLocked) {
+          saveHistoryBeforeChange()
+        } else if (hasPositionChanges && !hasNonPositionChanges && !isLocked) {
+          saveHistoryForPositionChange()
+        }
+      }
+
       // Check if any branching nodes are being removed or moved
       const removedBranchingNodeIds = new Set<string>()
       const movedBranchingNodeIds = new Set<string>()
       const selectedOutputNodeIds = new Set<string>()
-      const hasPositionChanges = changes.some((change) => change.type === 'position')
-      const hasNonPositionChanges = changes.some((change) => change.type !== 'position' && change.type !== 'select')
 
-      changes.forEach((change) => {
+      filteredChanges.forEach((change) => {
         if (change.type === 'remove') {
           const node = nodes.find((n) => n.id === change.id)
           const nodeType = node?.data?.nodeType as NodeType | undefined
@@ -589,17 +419,11 @@ function App() {
           if (nodeType && isBranchingOutputNodeType(nodeType)) {
             selectedOutputNodeIds.add(change.id)
           }
+
+          // Don't automatically open menus on node selection
+          // Menus should only open via the menu icon (three dots) click
         }
       })
-
-      // Save history for non-position changes immediately
-      if (hasNonPositionChanges && !isLocked) {
-        saveHistoryBeforeChange()
-      }
-      // For position changes, use debounced save
-      if (hasPositionChanges && !hasNonPositionChanges && !isLocked) {
-        saveHistoryForPositionChange()
-      }
 
       // If an output node is being selected, deselect its parent branching node
       if (selectedOutputNodeIds.size > 0) {
@@ -622,6 +446,135 @@ function App() {
         }
       }
 
+      // Handle output node removal - adjust branching node size and update params
+      const removedOutputNodeIds = new Set<string>()
+      const parentNodeIdsToUpdate = new Set<string>()
+
+      filteredChanges.forEach((change) => {
+        if (change.type === 'remove') {
+          const node = nodes.find((n) => n.id === change.id)
+          const nodeType = node?.data?.nodeType as NodeType | undefined
+          if (nodeType && isBranchingOutputNodeType(nodeType) && node?.data?.parentNodeId) {
+            // Double-check: prevent deletion of non-deletable output nodes (using config)
+            if (!canOutputNodeBeDeleted(nodeType)) {
+              // This should have been filtered out earlier, but add extra safety
+              return
+            }
+
+            removedOutputNodeIds.add(change.id)
+            const parentId = node.data.parentNodeId
+            parentNodeIdsToUpdate.add(parentId)
+
+            // Remove parent from deletion if it's also being deleted
+            const parentRemoveIndex = filteredChanges.findIndex(
+              (c) => c.type === 'remove' && c.id === parentId
+            )
+            if (parentRemoveIndex !== -1) {
+              filteredChanges.splice(parentRemoveIndex, 1)
+            }
+          }
+        }
+      })
+
+      // Update branching nodes when output nodes are removed
+      if (removedOutputNodeIds.size > 0 && parentNodeIdsToUpdate.size > 0) {
+        // First, remove the deleted output nodes
+        setNodes((nds) => {
+          let updatedNodes = nds.filter((n) => !removedOutputNodeIds.has(n.id))
+
+          parentNodeIdsToUpdate.forEach((parentId) => {
+            const branchingNode = updatedNodes.find((n) => n.id === parentId)
+            if (!branchingNode) return
+
+            const module = branchingNode.data?.moduleName ? modules.find((m) => m.name === branchingNode.data.moduleName) : undefined
+            if (!module?.outputConfig || module.outputConfig.type !== 'listParam') return
+
+            // Get remaining output nodes (after deletion)
+            const remainingOutputNodes = updatedNodes.filter((n) => {
+              const nType = n.data?.nodeType as NodeType | undefined
+              return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === parentId
+            })
+
+            // Update the list param array - remove the deleted output node's value
+            const listParamName = module.outputConfig.listParamName
+            const currentArray = Array.isArray(branchingNode.data?.params?.[listParamName])
+              ? [...branchingNode.data.params[listParamName]]
+              : []
+
+            // Get deleted nodes from original nodes array to find their indices
+            const deletedOutputNodes = nds.filter((n) => removedOutputNodeIds.has(n.id) && n.data.parentNodeId === parentId)
+            const deletedIndices = deletedOutputNodes
+              .map((n) => n.data?.outputIndex)
+              .filter((idx): idx is number => typeof idx === 'number')
+              .sort((a, b) => b - a) // Sort descending to remove from end first
+
+            let updatedArray = [...currentArray]
+            deletedIndices.forEach((idx) => {
+              if (idx >= 0 && idx < updatedArray.length) {
+                updatedArray.splice(idx, 1)
+              }
+            })
+
+            // Sort remaining output nodes by their current outputIndex to maintain order
+            const sortedRemaining = [...remainingOutputNodes].sort((a, b) => {
+              const idxA = typeof a.data?.outputIndex === 'number' ? a.data.outputIndex : 0
+              const idxB = typeof b.data?.outputIndex === 'number' ? b.data.outputIndex : 0
+              return idxA - idxB
+            })
+
+            // Update output indices to be sequential (0, 1, 2, ...)
+            sortedRemaining.forEach((outputNode, newIndex) => {
+              const nodeIndex = updatedNodes.findIndex((n) => n.id === outputNode.id)
+              if (nodeIndex >= 0) {
+                updatedNodes[nodeIndex] = {
+                  ...updatedNodes[nodeIndex],
+                  data: {
+                    ...updatedNodes[nodeIndex].data,
+                    outputIndex: newIndex,
+                  },
+                }
+              }
+            })
+
+            // Recalculate branching node size
+            const layoutConstants = getBranchingLayoutConstants()
+            const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight } = layoutConstants
+            const newOutputCount = remainingOutputNodes.length
+            const branchingNodeWidth = outputNodeWidth + padding * 2
+            const branchingNodeHeight = headerHeight + outputSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
+
+            // Update branching node
+            const branchingIndex = updatedNodes.findIndex((n) => n.id === parentId)
+            if (branchingIndex >= 0) {
+              updatedNodes[branchingIndex] = {
+                ...updatedNodes[branchingIndex],
+                style: {
+                  ...updatedNodes[branchingIndex].style,
+                  width: branchingNodeWidth,
+                  height: branchingNodeHeight,
+                },
+                data: {
+                  ...updatedNodes[branchingIndex].data,
+                  params: {
+                    ...updatedNodes[branchingIndex].data.params,
+                    [listParamName]: updatedArray,
+                  },
+                  outputCount: newOutputCount,
+                },
+              }
+            }
+
+            // Reposition remaining output nodes - this will use the updated outputIndex values
+            updatedNodes = repositionOutputNodes(updatedNodes, parentId, layoutConstants)
+          })
+
+          return updatedNodes
+        })
+
+        // Remove edges connected to deleted output nodes
+        setEdges((eds) => eds.filter((e) => !removedOutputNodeIds.has(e.source) && !removedOutputNodeIds.has(e.target)))
+      }
+
       // If branching nodes are being removed, also remove their output nodes
       if (removedBranchingNodeIds.size > 0) {
         setNodes((nds) => {
@@ -641,64 +594,88 @@ function App() {
       // If branching nodes are being moved, update their output node positions
       if (movedBranchingNodeIds.size > 0) {
         setNodes((nds) => {
-          const branchingConfig = nodeConfigs.branching
-          if (!branchingConfig) {
-            return nds
-          }
-
-          const padding = branchingConfig.padding || 20
-          const headerHeight = branchingConfig.headerHeight || 50
-          const outputSpacing = branchingConfig.outputSpacing || 10
-          const outputNodeHeight = branchingConfig.outputNodeHeight || 60
-
-          return nds.map((node) => {
-            const nodeType = node.data?.nodeType as NodeType | undefined
-            if (nodeType && isBranchingOutputNodeType(nodeType) && node.data.parentNodeId && movedBranchingNodeIds.has(node.data.parentNodeId)) {
-              const branchingNode = nds.find((n) => {
-                const nType = n.data?.nodeType as NodeType | undefined
-                return n.id === node.data.parentNodeId && nType && isBranchingNodeType(nType)
-              })
-              if (branchingNode) {
-                const outputNodes = nds.filter((n) => {
-                  const nType = n.data?.nodeType as NodeType | undefined
-                  return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === branchingNode.id
-                })
-                const index = outputNodes.findIndex((n) => n.id === node.id)
-                if (index >= 0) {
-                  const branchingPos = branchingNode.position || { x: 0, y: 0 }
-                  return {
-                    ...node,
-                    position: {
-                      x: branchingPos.x + padding,
-                      y: branchingPos.y + headerHeight + outputSpacing + index * (outputNodeHeight + outputSpacing),
-                    },
-                  }
-                }
-              }
-            }
-            return node
+          let updatedNodes = nds
+          movedBranchingNodeIds.forEach((branchingNodeId) => {
+            updatedNodes = repositionOutputNodes(updatedNodes, branchingNodeId)
           })
+          return updatedNodes
         })
       }
 
-      onNodesChange(changes)
+      onNodesChange(filteredChanges)
     },
-    [nodes, onNodesChange, setNodes, setEdges]
+    [nodes, onNodesChange, setNodes, setEdges, saveHistoryBeforeChange, saveHistoryForPositionChange, isLocked]
   )
 
   const handleLabelClick = useCallback((nodeId: string) => {
-    setOpenMenuNodeId(nodeId)
-  }, [])
+    // Close any existing menu first to ensure clean state transition
+    // This prevents the justOpenedRef from blocking the new menu
+    if (openMenuNodeId && openMenuNodeId !== nodeId) {
+      setOpenMenuNodeId(null)
+      setMenuPosition(null)
+    }
+
+    // If clicking on an output node menu icon, ensure the output node is selected (not the parent)
+    const clickedNode = nodes.find((n) => n.id === nodeId)
+    if (clickedNode?.data?.nodeType && isBranchingOutputNodeType(clickedNode.data.nodeType as NodeType)) {
+      // Select the output node explicitly and deselect parent and all other nodes
+      setNodes((nds) => {
+        const updated = nds.map((n) => {
+          // Deselect parent if it exists
+          if (clickedNode.data?.parentNodeId && n.id === clickedNode.data.parentNodeId) {
+            return { ...n, selected: false }
+          }
+          // Select the clicked output node
+          if (n.id === nodeId) {
+            return { ...n, selected: true }
+          }
+          // Deselect all other nodes
+          return { ...n, selected: false }
+        })
+        return updated
+      })
+    } else {
+      // For non-output nodes, just ensure they're selected
+      setNodes((nds) => {
+        return nds.map((n) => ({
+          ...n,
+          selected: n.id === nodeId,
+        }))
+      })
+    }
+
+    // Use a tiny delay to ensure previous menu is fully closed before opening new one
+    // This prevents the justOpenedRef from interfering
+    setTimeout(() => {
+      setOpenMenuNodeId(nodeId)
+      setMenuPosition(null) // Reset position so menu opens at logical place next to node
+    }, 0)
+  }, [nodes, setNodes, openMenuNodeId])
 
   const handleCloseMenu = useCallback(() => {
     setOpenMenuNodeId(null)
+    setMenuPosition(null)
+  }, [])
+
+  const handleMenuPositionChange = useCallback((position: { x: number; y: number } | null) => {
+    setMenuPosition(position)
+  }, [])
+
+  const handlePaneClick = useCallback((event: React.MouseEvent) => {
+    // Check if click is on toolbar buttons - don't close menu in that case
+    const target = event.target as HTMLElement
+    const isToolbarButton = target.closest('.toolbar-nav-button') !== null
+    const isToolbar = target.closest('.nodes-toolbar') !== null
+
+    // Only close menu if clicking on canvas, not on toolbar
+    if (!isToolbarButton && !isToolbar) {
+      setOpenMenuNodeId(null)
+      setMenuPosition(null)
+    }
   }, [])
 
   const handleNodeDataUpdate = useCallback((nodeId: string, updatedData: any) => {
-    // Save history before updating node data
-    if (!isLocked) {
-      saveHistoryBeforeChange()
-    }
+    // Don't save history for param changes - only node add/remove and connections are in history
     setNodes((nds) => {
       return nds.map((node) => {
         if (node.id === nodeId) {
@@ -724,37 +701,64 @@ function App() {
     })
   }, [setNodes, saveHistoryBeforeChange, isLocked])
 
+  const handleDeleteNode = useCallback((nodeId: string) => {
+    if (isLocked) return
+
+    // Check if this is an output node that shouldn't be deleted
+    const nodeToDelete = nodes.find((n) => n.id === nodeId)
+    const nodeType = nodeToDelete?.data?.nodeType as NodeType | undefined
+
+    // Prevent deletion of non-deletable output nodes (using config)
+    if (nodeType && isBranchingOutputNodeType(nodeType)) {
+      if (!canOutputNodeBeDeleted(nodeType)) {
+        return // Don't delete non-deletable output nodes
+      }
+    }
+
+    saveHistoryBeforeChange()
+
+    setNodes((nds) => {
+      const node = nds.find((n) => n.id === nodeId)
+      if (!node) return nds
+
+      // If it's a branching node, also remove its output nodes
+      const nodeType = node.data?.nodeType as NodeType | undefined
+      if (nodeType && isBranchingNodeType(nodeType)) {
+        const outputNodeIds = nds
+          .filter((n) => {
+            const nType = n.data?.nodeType as NodeType | undefined
+            return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === nodeId
+          })
+          .map((n) => n.id)
+
+        // Remove edges connected to output nodes
+        setEdges((eds) => eds.filter((e) => !outputNodeIds.includes(e.source) && !outputNodeIds.includes(e.target)))
+
+        // Remove output nodes and the branching node
+        return nds.filter((n) => n.id !== nodeId && !outputNodeIds.includes(n.id))
+      }
+
+      // For other nodes, just remove the node
+      return nds.filter((n) => n.id !== nodeId)
+    })
+
+    // Remove edges connected to the deleted node
+    setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
+
+    // Close menu if the deleted node's menu was open
+    if (openMenuNodeId === nodeId) {
+      setOpenMenuNodeId(null)
+      setMenuPosition(null)
+    }
+  }, [isLocked, saveHistoryBeforeChange, setNodes, setEdges, openMenuNodeId, nodes])
+
   const handleExportJson = useCallback(() => {
     if (!reactFlowInstance) {
       console.warn('ReactFlow instance not available')
       return
     }
 
-    // Export only module logic: nodes, edges, and params (no config info)
-    const exportData = {
-      nodes: nodes.map((node) => {
-        const nodeType = node.data?.nodeType as NodeType | undefined
-        return {
-          id: node.id,
-          type: nodeType || 'single', // Use actual nodeType instead of 'nodeFactory'
-          position: node.position,
-          data: {
-            moduleName: node.data?.moduleName,
-            params: node.data?.params || {},
-            ...(node.data?.parentNodeId && { parentNodeId: node.data.parentNodeId }),
-            ...(node.data?.outputCount !== undefined && { outputCount: node.data.outputCount }),
-          },
-        }
-      }),
-      edges: edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        ...(edge.sourceHandle && { sourceHandle: edge.sourceHandle }),
-        ...(edge.targetHandle && { targetHandle: edge.targetHandle }),
-      })),
-    }
-
+    const exportData = exportFlowToJson(nodes, edges)
     console.log('Export JSON:', JSON.stringify(exportData, null, 2))
 
     // Also copy to clipboard
@@ -765,48 +769,19 @@ function App() {
     })
   }, [reactFlowInstance, nodes, edges])
 
+  const { validate } = useValidation(nodes, edges)
+
   const handleValidate = useCallback(() => {
-    // Get all nodes that have source handles (can output)
-    const nodesWithSourceHandles = nodes.filter((node) => {
-      const nodeType = node.data?.nodeType as NodeType | undefined
-      if (!nodeType) return false
-      const config = nodeConfigs[nodeType]
-      return config?.hasSourceHandles === true
-    })
-
-    // Check if all nodes with source handles have outgoing edges
-    const unconnectedNodes = nodesWithSourceHandles.filter((node) => {
-      const hasOutgoingEdge = edges.some((edge) => edge.source === node.id)
-      return !hasOutgoingEdge
-    })
-
-    if (unconnectedNodes.length === 0) {
-      setValidationStatus({
-        isValid: true,
-        message: 'All nodes with outputs are connected',
-      })
-    } else {
-      const nodeLabels = unconnectedNodes.map((n) => {
-        const label = n.data?.label || n.id
-        // If node has a parent, include parent information
-        if (n.data?.parentNodeId) {
-          const parentNode = nodes.find((parent) => parent.id === n.data.parentNodeId)
-          const parentLabel = parentNode?.data?.label || n.data.parentNodeId
-          return `${label} (parent: ${parentLabel})`
-        }
-        return label
-      }).join(', ')
-      setValidationStatus({
-        isValid: false,
-        message: `${unconnectedNodes.length} node(s) with outputs are not connected: ${nodeLabels}`,
-      })
-    }
-
-  }, [nodes, edges])
+    const result = validate()
+    setValidationStatus(result)
+  }, [validate])
 
   const handleDismissValidation = useCallback(() => {
     setValidationStatus({ isValid: null, message: '' })
   }, [])
+
+  // Flag to prevent saving history during undo/redo operations
+  const isRestoringStateRef = useRef(false)
 
   // Undo/Redo handlers
   const handleUndo = useCallback(() => {
@@ -814,32 +789,80 @@ function App() {
 
     const previousState = history.undo()
     if (previousState) {
-      // Preserve openMenuNodeId if the node still exists after undo
-      const currentNodeStillExists = previousState.nodes.some((n) => n.id === openMenuNodeId)
-      if (!currentNodeStillExists) {
-        setOpenMenuNodeId(null)
-      }
+      isRestoringStateRef.current = true
 
-      setNodes(previousState.nodes)
+      // Clear connectingFrom state from all nodes to prevent handles from staying visible
+      const cleanedNodes = previousState.nodes.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          connectingFrom: null,
+        },
+      }))
+
+      // Update nodes and edges directly - useNodesState/useEdgesState will handle ReactFlow sync
+      setNodes(cleanedNodes)
       setEdges(previousState.edges)
+
+      // Clear ReactFlow's internal connection state to hide any visible handles
+      // Use a small delay to ensure ReactFlow has processed the state update
+      setTimeout(() => {
+        onConnectEnd(new MouseEvent('mouseup'))
+      }, 0)
+
+      // Close menu on undo (params are not in history anymore)
+      setOpenMenuNodeId(null)
+      setMenuPosition(null)
+
+      // Reset flag after ReactFlow has processed the state changes
+      // Use requestAnimationFrame twice to ensure ReactFlow has fully processed
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          isRestoringStateRef.current = false
+        })
+      })
     }
-  }, [history, isLocked, setNodes, setEdges, openMenuNodeId])
+  }, [history, isLocked, setNodes, setEdges, onConnectEnd])
 
   const handleRedo = useCallback(() => {
     if (!history.canRedo || isLocked) return
 
     const nextState = history.redo()
     if (nextState) {
-      // Preserve openMenuNodeId if the node still exists after redo
-      const currentNodeStillExists = nextState.nodes.some((n) => n.id === openMenuNodeId)
-      if (!currentNodeStillExists) {
-        setOpenMenuNodeId(null)
-      }
+      isRestoringStateRef.current = true
 
-      setNodes(nextState.nodes)
+      // Clear connectingFrom state from all nodes to prevent handles from staying visible
+      const cleanedNodes = nextState.nodes.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          connectingFrom: null,
+        },
+      }))
+
+      // Update nodes and edges directly
+      setNodes(cleanedNodes)
       setEdges(nextState.edges)
+
+      // Clear ReactFlow's internal connection state to hide any visible handles
+      // Use a small delay to ensure ReactFlow has processed the state update
+      setTimeout(() => {
+        onConnectEnd(new MouseEvent('mouseup'))
+      }, 0)
+
+      // Close menu on redo (params are not in history anymore)
+      setOpenMenuNodeId(null)
+      setMenuPosition(null)
+
+      // Reset flag after ReactFlow has processed the state changes
+      // Use requestAnimationFrame twice to ensure ReactFlow has fully processed
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          isRestoringStateRef.current = false
+        })
+      })
     }
-  }, [history, isLocked, setNodes, setEdges, openMenuNodeId])
+  }, [history, isLocked, setNodes, setEdges, onConnectEnd])
 
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
@@ -868,187 +891,11 @@ function App() {
     }
   }, [handleUndo, handleRedo])
 
-  const handleOutputCountChange = useCallback((nodeId: string, count: number) => {
-    // Find the node and check if it's internal type (output count is fixed)
-    const node = nodes.find((n) => n.id === nodeId)
-    if (node?.data?.moduleName) {
-      const module = modules.find((m) => m.name === node.data.moduleName)
-      if (module?.outputConfig?.type === 'internal') {
-        // Don't allow output count changes for internal type
-        return
-      }
-    }
-
-    if (!isLocked) {
-      saveHistoryBeforeChange()
-    }
-    setNodes((nds) => {
-      // Update the branching node's output count
-      const updatedNodes = nds.map((node) => {
-        const nodeType = node.data?.nodeType as NodeType | undefined
-        if (node.id === nodeId && nodeType && isBranchingNodeType(nodeType)) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              outputCount: count,
-            },
-          }
-        }
-        return node
-      })
-
-      // Find the branching node
-      const branchingNode = updatedNodes.find((n) => {
-        const nType = n.data?.nodeType as NodeType | undefined
-        return n.id === nodeId && nType && isBranchingNodeType(nType)
-      })
-      if (!branchingNode) return updatedNodes
-
-      // Get existing output nodes for this branching node
-      const existingOutputNodes = updatedNodes.filter((n) => {
-        const nType = n.data?.nodeType as NodeType | undefined
-        return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === nodeId
-      })
-
-      const currentCount = existingOutputNodes.length
-      const newCount = count
-
-      // Get layout constants from nodeConfigs
-      const branchingConfig = nodeConfigs.branching
-      if (!branchingConfig) {
-        return updatedNodes
-      }
-
-      const padding = branchingConfig.padding || 20
-      const headerHeight = branchingConfig.headerHeight || 50
-      const outputSpacing = branchingConfig.outputSpacing || 10
-      const outputNodeWidth = branchingConfig.outputNodeWidth || 130
-      const outputNodeHeight = branchingConfig.outputNodeHeight || 60
-
-      // Update branching node size based on new output count
-      // Header at top, then consistent spacing between header and outputs, and between outputs
-      const branchingNodeWidth = outputNodeWidth + padding * 2
-      const branchingNodeHeight = headerHeight + outputSpacing + (newCount * outputNodeHeight) + ((newCount - 1) * outputSpacing) + padding
-
-      const updatedBranchingNode = {
-        ...branchingNode,
-        style: {
-          ...branchingNode.style,
-          width: branchingNodeWidth,
-          height: branchingNodeHeight,
-        },
-      }
-
-      const nodesWithUpdatedBranching = updatedNodes.map((node) =>
-        node.id === nodeId ? updatedBranchingNode : node
-      )
-
-      if (newCount > currentCount) {
-        // Add new output nodes positioned inside branching node
-        const nodesToAdd: Node[] = []
-        const branchingPos = branchingNode.position || { x: 0, y: 0 }
-
-        const outputConfig = nodeConfigs.branchingOutput
-        if (!outputConfig) {
-          return nodesWithUpdatedBranching
-        }
-
-        // Get module info from branching node
-        const branchingModule = branchingNode.data?.moduleName ? modules.find((m) => m.name === branchingNode.data.moduleName) : undefined
-
-        for (let i = currentCount; i < newCount; i++) {
-          // Determine output node params based on outputConfig
-          let outputParams: Record<string, any> = {}
-          let outputLabel = `Output ${i + 1}`
-
-          if (branchingModule?.outputConfig) {
-            if (branchingModule.outputConfig.type === 'listParam' && branchingModule.outputConfig.listParamName) {
-              const listParam = branchingModule.params[branchingModule.outputConfig.listParamName]
-              if (listParam) {
-                // Initialize based on param type
-                if (listParam.type === 'number') {
-                  outputParams.value = 0
-                } else if (listParam.type === 'boolean') {
-                  outputParams.value = false
-                } else {
-                  outputParams.value = ''
-                }
-              }
-            }
-          }
-
-          const outputNode = createNodeFromConfig(NODE_TYPES.BRANCHING_OUTPUT, {
-            x: branchingPos.x + padding,
-            y: branchingPos.y + headerHeight + outputSpacing + i * (outputNodeHeight + outputSpacing),
-          }, {
-            moduleName: branchingNode.data?.moduleName,
-            parentNodeId: nodeId,
-            connectingFrom: null,
-            params: outputParams,
-          })
-
-          // Set label for output node
-          outputNode.data.label = outputLabel
-          nodesToAdd.push(outputNode)
-        }
-        return [...nodesWithUpdatedBranching, ...nodesToAdd]
-      } else if (newCount < currentCount) {
-        // Remove excess output nodes
-        const nodesToRemove = existingOutputNodes.slice(newCount)
-        const nodeIdsToRemove = new Set(nodesToRemove.map((n) => n.id))
-
-        // Also remove edges connected to these nodes
-        setEdges((eds) => eds.filter((e) => !nodeIdsToRemove.has(e.source) && !nodeIdsToRemove.has(e.target)))
-
-        // Update remaining output nodes positions and branching node size
-        const remainingOutputNodes = existingOutputNodes.slice(0, newCount)
-        const branchingPos = branchingNode.position || { x: 0, y: 0 }
-
-        const nodesWithRepositionedOutputs = nodesWithUpdatedBranching.map((node) => {
-          const nodeType = node.data?.nodeType as NodeType | undefined
-          if (nodeType && isBranchingOutputNodeType(nodeType) && node.data.parentNodeId === nodeId) {
-            const index = remainingOutputNodes.findIndex((n) => n.id === node.id)
-            if (index >= 0) {
-              return {
-                ...node,
-                position: {
-                  x: branchingPos.x + padding,
-                  y: branchingPos.y + headerHeight + outputSpacing + index * (outputNodeHeight + outputSpacing),
-                },
-              }
-            }
-          }
-          return node
-        })
-
-        return nodesWithRepositionedOutputs.filter((n) => !nodeIdsToRemove.has(n.id))
-      }
-
-      // Update output node positions even if count didn't change (in case branching node moved)
-      const branchingPos = branchingNode.position || { x: 0, y: 0 }
-      const nodesWithRepositionedOutputs = nodesWithUpdatedBranching.map((node) => {
-        const nodeType = node.data?.nodeType as NodeType | undefined
-        if (nodeType && isBranchingOutputNodeType(nodeType) && node.data.parentNodeId === nodeId) {
-          const index = existingOutputNodes.findIndex((n) => n.id === node.id)
-          if (index >= 0) {
-            return {
-              ...node,
-              position: {
-                x: branchingPos.x + padding,
-                y: branchingPos.y + headerHeight + outputSpacing + index * (outputNodeHeight + outputSpacing),
-              },
-            }
-          }
-        }
-        return node
-      })
-
-      return nodesWithRepositionedOutputs
-    })
-  }, [setNodes, setEdges])
-
   const handleAddOutput = useCallback((nodeId: string) => {
+    // Save history before adding output node
+    if (!isLocked) {
+      saveHistoryBeforeChange('other')
+    }
     setNodes((nds) => {
       const branchingNode = nds.find((n) => n.id === nodeId)
       if (!branchingNode) return nds
@@ -1064,13 +911,8 @@ function App() {
         : []
 
       // Add new empty value to array
-      const { inner } = parseType(module.params[listParamName]?.type)
-      let newValue: any = ''
-      if (inner === 'number') {
-        newValue = 0
-      } else if (inner === 'boolean') {
-        newValue = false
-      }
+      const listParam = module.params.find(p => p.name === listParamName)
+      const newValue = getDefaultValueForParamType(listParam?.type)
 
       const updatedArray = [...currentArray, newValue]
 
@@ -1097,56 +939,48 @@ function App() {
         return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === nodeId
       })
 
-      const branchingConfig = nodeConfigs.branching
-      if (!branchingConfig) return updatedNodes
-
-      const padding = branchingConfig.padding || 20
-      const headerHeight = branchingConfig.headerHeight || 50
-      const outputSpacing = branchingConfig.outputSpacing || 10
-      const outputNodeWidth = branchingConfig.outputNodeWidth || 130
-      const outputNodeHeight = branchingConfig.outputNodeHeight || 60
-
-      // Create new output node
+      const layoutConstants = getBranchingLayoutConstants()
+      const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight } = layoutConstants
       const newIndex = existingOutputNodes.length
       const branchingPos = branchingNode.position || { x: 0, y: 0 }
+      const newOutputCount = newIndex + 1
 
-      const outputParams: Record<string, any> = { value: newValue }
-      const outputNode = createNodeFromConfig(NODE_TYPES.BRANCHING_OUTPUT, {
-        x: branchingPos.x + padding,
-        y: branchingPos.y + headerHeight + outputSpacing + newIndex * (outputNodeHeight + outputSpacing),
-      }, {
+      // Get the value from the array (should be the last element we just added)
+      const outputValue = updatedArray[newIndex]
+
+      // Get the output node type from branching node config
+      const branchingNodeType = branchingNode.data?.nodeType as NodeType | undefined
+      const branchingConfig = branchingNodeType ? nodeConfigs[branchingNodeType] : undefined
+      const outputNodeType = branchingConfig?.outputNodeType
+
+      if (!outputNodeType) {
+        console.error(`Branching node ${branchingNodeType} does not specify outputNodeType`)
+        return updatedNodes
+      }
+
+      const outputNode = createNodeFromConfig(outputNodeType, calculateOutputNodePosition(branchingPos, newIndex, layoutConstants), {
         moduleName: branchingNode.data?.moduleName,
         parentNodeId: nodeId,
         connectingFrom: null,
-        params: outputParams,
+        params: { value: outputValue },
+        outputIndex: newIndex, // Store index for reference
       })
-
-      outputNode.data.label = String(newValue) || 'Output'
+      // Set label - use value if available, otherwise "_"
+      outputNode.data.label = (outputValue !== null && outputValue !== undefined && outputValue !== '') ? String(outputValue) : '_'
 
       // Update branching node size
-      const newOutputCount = newIndex + 1
       const branchingNodeWidth = outputNodeWidth + padding * 2
       const branchingNodeHeight = headerHeight + outputSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
 
-      const finalNodes = updatedNodes.map((node) => {
-        if (node.id === nodeId) {
-          return {
+      return updatedNodes.map((node) =>
+        node.id === nodeId
+          ? {
             ...node,
-            style: {
-              ...node.style,
-              width: branchingNodeWidth,
-              height: branchingNodeHeight,
-            },
-            data: {
-              ...node.data,
-              outputCount: newOutputCount,
-            },
+            style: { ...node.style, width: branchingNodeWidth, height: branchingNodeHeight },
+            data: { ...node.data, outputCount: newOutputCount },
           }
-        }
-        return node
-      })
-
-      return [...finalNodes, outputNode]
+          : node
+      ).concat(outputNode)
     })
   }, [setNodes, saveHistoryBeforeChange, isLocked])
 
@@ -1160,7 +994,13 @@ function App() {
 
     // Recalculate label based on module config
     const module = node.data?.moduleName ? modules.find((m) => m.name === node.data.moduleName) : undefined
-    const calculatedLabel = getNodeLabel(module, node.data, nodeType)
+
+    // For internal handling output nodes, use predefined labels from module config
+    let calculatedLabel = getNodeLabel(module, node.data, nodeType)
+    if (isBranchingOutputNodeType(nodeType) && module?.outputConfig?.type === 'internal' && module.outputLabels) {
+      const outputIndex = node.data?.outputIndex ?? 0
+      calculatedLabel = module.outputLabels[outputIndex] || calculatedLabel
+    }
 
     return {
       ...node,
@@ -1168,8 +1008,17 @@ function App() {
         ...node.data,
         label: calculatedLabel,
         onLabelClick: handleLabelClick,
+        // No need for isInternalOutput flag - we check parent node type instead
       },
       draggable: !(node.data?.nodeType && isBranchingOutputNodeType(node.data.nodeType as NodeType)), // Output nodes are not draggable - they move with parent
+      selectable: (() => {
+        // Output nodes that cannot be deleted should not be selectable
+        const nodeType = node.data?.nodeType as NodeType | undefined
+        if (nodeType && isBranchingOutputNodeType(nodeType)) {
+          return canOutputNodeBeDeleted(nodeType) // Only selectable if deletable
+        }
+        return true
+      })(),
       zIndex,
     }
   })
@@ -1188,6 +1037,7 @@ function App() {
           onLockToggle={() => setIsLocked((prev) => !prev)}
           showMinimap={showMinimap}
           onMinimapToggle={() => setShowMinimap((prev) => !prev)}
+          hasNodes={nodes.length > 0}
           onExportJson={handleExportJson}
           onValidate={handleValidate}
           onUndo={handleUndo}
@@ -1212,6 +1062,7 @@ function App() {
           onDrop={onDrop}
           onDragOver={onDragOver}
           onMove={onMove}
+          onPaneClick={handlePaneClick}
           isLocked={isLocked}
         />
 
@@ -1225,9 +1076,11 @@ function App() {
               onClose={handleCloseMenu}
               reactFlowWrapper={reactFlowWrapper}
               reactFlowInstance={reactFlowInstance}
-              onOutputCountChange={menuNode.data?.nodeType && isBranchingNodeType(menuNode.data.nodeType as NodeType) ? handleOutputCountChange : undefined}
               onNodeDataUpdate={handleNodeDataUpdate}
               onAddOutput={menuNode.data?.nodeType && isBranchingNodeType(menuNode.data.nodeType as NodeType) ? handleAddOutput : undefined}
+              onDeleteNode={handleDeleteNode}
+              initialPosition={menuPosition}
+              onPositionChange={handleMenuPositionChange}
             />
           )
         })()}

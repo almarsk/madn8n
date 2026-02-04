@@ -20,6 +20,7 @@ interface ToolbarProps {
   onRedo: () => void
   canUndo: boolean
   canRedo: boolean
+  hasNodes: boolean
 }
 
 export default function Toolbar({
@@ -39,11 +40,18 @@ export default function Toolbar({
   onRedo,
   canUndo,
   canRedo,
+  hasNodes,
 }: ToolbarProps) {
   const [toolbarPosition, setToolbarPosition] = useState({ x: 16, y: 16 })
   const [toolbarSize, setToolbarSize] = useState({ width: 280, height: 260 })
   const [isToolbarMinimized, setIsToolbarMinimized] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const toolbarRef = useRef<HTMLDivElement>(null)
+
+  // Filter modules based on search query (substring search, case-insensitive)
+  const filteredModules = modules.filter((module) =>
+    module.name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
 
   // Fixed width based on button bar - buttons will wrap to new lines
   const TOOLBAR_FIXED_WIDTH = 280
@@ -140,11 +148,17 @@ export default function Toolbar({
 
     const startY = event.clientY
     const { height } = toolbarSize
+    const startTop = toolbarPosition.y
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaY = moveEvent.clientY - startY
-
-      const nextHeight = Math.max(160, height + deltaY)
+      let nextHeight = Math.max(160, height + deltaY)
+      
+      // Constrain height to viewport
+      const viewportHeight = window.innerHeight
+      const margin = 10
+      const maxHeight = viewportHeight - startTop - margin
+      nextHeight = Math.min(nextHeight, maxHeight)
 
       // Only allow vertical resizing, width is fixed
       setToolbarSize({ width: TOOLBAR_FIXED_WIDTH, height: nextHeight })
@@ -187,12 +201,16 @@ export default function Toolbar({
         <div className="nodes-toolbar-body">
           <section className="nodes-toolbar-section">
             <div className="toolbar-nav">
-
               <button
                 type="button"
                 className={`toolbar-nav-button ${showMinimap ? 'toolbar-lock-button--active' : ''}`}
                 onClick={onMinimapToggle}
-                title={showMinimap ? 'Hide minimap' : 'Show minimap'}
+                disabled={!hasNodes}
+                title={hasNodes ? (showMinimap ? 'Hide minimap' : 'Show minimap') : 'No nodes to display'}
+                style={{
+                  opacity: hasNodes ? 1 : 0.5,
+                  cursor: hasNodes ? 'pointer' : 'not-allowed',
+                }}
               >
                 🗺️
               </button>
@@ -240,12 +258,33 @@ export default function Toolbar({
               </button>
             </div>
           </section>
-          <section className="nodes-toolbar-section">
-            <NodeList
-              modules={modules}
-              onNodeDragStart={onNodeDragStart}
-              onSidebarNodeClick={onSidebarNodeClick}
-            />
+          <section className="nodes-toolbar-section" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {/* Search bar - in modules section, stays visible */}
+            <div style={{ marginBottom: '0.5rem', flexShrink: 0 }}>
+              <input
+                type="text"
+                placeholder="Search modules..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid rgba(148, 163, 184, 0.7)',
+                  borderRadius: '4px',
+                  background: 'rgba(15, 23, 42, 0.9)',
+                  color: '#e5e7eb',
+                  fontSize: '0.875rem',
+                }}
+              />
+            </div>
+            {/* NodeList - scrollable, no visible scrollbar */}
+            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, scrollbarWidth: 'none', msOverflowStyle: 'none' }} className="nodes-list-wrapper">
+              <NodeList
+                modules={filteredModules}
+                onNodeDragStart={onNodeDragStart}
+                onSidebarNodeClick={onSidebarNodeClick}
+              />
+            </div>
           </section>
 
           <div
