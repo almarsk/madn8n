@@ -8,9 +8,7 @@ import ReactFlow, {
   type Connection,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
-import DynamicNode from '../DynamicNode'
-import BranchingNode from '../BranchingNode'
-import BranchingNodeOutput from '../BranchingNodeOutput'
+import NodeFactory from '../NodeFactory'
 
 interface FlowCanvasProps {
   nodes: Node[]
@@ -45,9 +43,7 @@ export default function FlowCanvas({
 }: FlowCanvasProps) {
   const nodeTypes = useMemo(
     () => ({
-      dynamic: DynamicNode,
-      branching: BranchingNode,
-      branchingOutput: BranchingNodeOutput,
+      nodeFactory: NodeFactory,
     }),
     []
   )

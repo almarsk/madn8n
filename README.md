@@ -4,14 +4,19 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
 
 ## TODO
 
-- main menu
-- undo/redo
-- two way conversion between reactflow and maddie json
-- text editor
-- nodes config ui 
-- branching nodes config ui
-- refactoring
-- validation
+- maddie fication
+    - main menu
+    - two way conversion between reactflow and maddie json
+- features
+    - nodes config ui 
+    - branching nodes config ui
+    - undo/redo
+    - text editor
+    - validation
+
+- maintenance
+    - refactoring
+    - module types
 
 ## Features
 

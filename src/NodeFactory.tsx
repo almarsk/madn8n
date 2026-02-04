@@ -1,13 +1,19 @@
 import { Handle, Position, type NodeProps, useReactFlow } from 'reactflow'
+import nodeConfigs, { type NodeConfig, type NodeType, isBranchingNodeType } from './nodeConfigs'
 
-interface DynamicNodeData {
+interface NodeFactoryData extends NodeConfig {
     label: string
+    nodeType: NodeType
     connectingFrom?: string | null
     attemptingFromBlockedNode?: string | null
     onLabelClick?: (nodeId: string) => void
+    // For branching nodes
+    outputCount?: number
+    // For branching output nodes
+    parentNodeId?: string
 }
 
-function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
+function NodeFactory({ data, id }: NodeProps<NodeFactoryData>) {
     const { getNodes, getEdges } = useReactFlow()
     const nodes = getNodes()
     const edges = getEdges()
@@ -16,14 +22,20 @@ function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
     const isDraggingConnection = connectingFrom !== null
     const isSourceNode = connectingFrom === id
 
+    // Get node configuration
+    const nodeType = data.nodeType || NODE_TYPES.SINGLE
+    const config = nodeConfigs[nodeType]
+    
+    if (!config) {
+        console.warn(`Unknown node type: ${nodeType}`)
+        return null
+    }
+
     // Check if this node already has an outgoing edge
     const hasOutgoingEdge = edges.some(edge => edge.source === id)
 
     // Show target handles visibly when dragging a connection (and this is not the source node)
-    const showTargetHandlesVisible = isDraggingConnection && !isSourceNode
-
-    // Always render target handles for React Flow detection
-    const showTargetHandles = true
+    const showTargetHandlesVisible = isDraggingConnection && !isSourceNode && config.hasTargetHandles
 
     const handleLabelClick = (e: React.MouseEvent) => {
         e.stopPropagation()
@@ -32,23 +44,36 @@ function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
         }
     }
 
+    // Determine if source handles should be shown
+    // For single nodes: only show if not connected yet
+    // For branchingOutput: only show if not connected yet
+    // For branching: never show (config.hasSourceHandles is false)
+    const showSourceHandles = config.hasSourceHandles && !hasOutgoingEdge
+
+    // Determine CSS classes
+    const baseClasses = 'dynamic-node'
+    const connectedClass = hasOutgoingEdge ? 'dynamic-node--connected' : ''
+    const typeClass = config.className || ''
+    const nodeClasses = `${baseClasses} ${typeClass} ${connectedClass}`.trim()
+
+    // Determine cursor style
+    const cursorStyle = hasOutgoingEdge ? 'default' : 'grab'
+
     return (
         <div
-            className={`dynamic-node ${hasOutgoingEdge ? 'dynamic-node--connected' : ''}`}
-            style={{ cursor: hasOutgoingEdge ? 'default' : 'grab' }}
+            className={nodeClasses}
+            style={{ cursor: cursorStyle }}
         >
-
             <div
-                className="dynamic-node-label"
+                className={`dynamic-node-label ${isBranchingNodeType(nodeType) ? 'branching-node-header' : ''}`}
                 onClick={handleLabelClick}
             >
                 {data.label}
                 <span className="dynamic-node-label-menu-icon">⋮</span>
             </div>
 
-            {/* Target handles - visible when dragging a connection */}
-            {/* Target handles can receive connections but cannot start them */}
-            {showTargetHandles && (
+            {/* Target handles - render if config allows */}
+            {config.hasTargetHandles && (
                 <>
                     <Handle
                         type="target"
@@ -85,10 +110,8 @@ function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
                 </>
             )}
 
-            {/* Source handles - only render if node is not connected yet */}
-            {/* Once connected, no need for source handles */}
-            {/* Source handles can start connections */}
-            {!hasOutgoingEdge && (
+            {/* Source handles - render if config allows and conditions are met */}
+            {showSourceHandles && (
                 <>
                     <Handle
                         type="source"
@@ -96,7 +119,7 @@ function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
                         id="top-source"
                         className="invisible-handle"
                         isConnectable={true}
-                        isConnectableStart={true}
+                        isConnectableStart={config.canStartConnection}
                     />
                     <Handle
                         type="source"
@@ -104,7 +127,7 @@ function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
                         id="right-source"
                         className="invisible-handle"
                         isConnectable={true}
-                        isConnectableStart={true}
+                        isConnectableStart={config.canStartConnection}
                     />
                     <Handle
                         type="source"
@@ -112,7 +135,7 @@ function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
                         id="bottom-source"
                         className="invisible-handle"
                         isConnectable={true}
-                        isConnectableStart={true}
+                        isConnectableStart={config.canStartConnection}
                     />
                     <Handle
                         type="source"
@@ -120,7 +143,7 @@ function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
                         id="left-source"
                         className="invisible-handle"
                         isConnectable={true}
-                        isConnectableStart={true}
+                        isConnectableStart={config.canStartConnection}
                     />
                 </>
             )}
@@ -128,4 +151,4 @@ function DynamicNode({ data, id }: NodeProps<DynamicNodeData>) {
     )
 }
 
-export default DynamicNode
+export default NodeFactory

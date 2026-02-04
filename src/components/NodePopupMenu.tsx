@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ReactFlowInstance, type Node } from 'reactflow'
 import './NodePopupMenu.css'
 import modules, { type Module } from '../modules'
+import { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES } from '../nodeConfigs'
 
 interface NodePopupMenuProps {
   node: Node
@@ -13,44 +14,47 @@ interface NodePopupMenuProps {
 
 export default function NodePopupMenu({ node, onClose, reactFlowWrapper, reactFlowInstance, onOutputCountChange }: NodePopupMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState({ x: 0, y: 0 })
-  const module = modules.find((m: Module) => m.name === 'Branching')
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
+  const nodeType = (node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType
+  const module = modules.find((m: Module) => m.type === nodeType)
   const outputCountConfig = module?.outputCountConfig || { min: 1, max: 10 }
   const [outputCount, setOutputCount] = useState(node.data.outputCount || 1)
 
   useEffect(() => {
-    if (node.type === 'branching') {
-      setOutputCount(node.data.outputCount || 1)
+    console.log('node.data', node.data)
+    if (isBranchingNodeType(nodeType)) {
+      setOutputCount(node.data.outputCount || 2)
     }
-  }, [node.data.outputCount, node.type])
+  }, [node.data.outputCount, nodeType])
 
   useEffect(() => {
     if (!reactFlowInstance || !reactFlowWrapper.current) return
 
     const updatePosition = () => {
       if (!reactFlowInstance || !reactFlowWrapper.current) return
-      
+
       const nodePosition = node.position
       const style = node.style || {}
       const nodeWidth = typeof style.width === 'number' ? style.width : 150
-      
+
       // Convert flow position to screen position
       const screenPos = reactFlowInstance.flowToScreenPosition({
         x: nodePosition.x + nodeWidth + 10,
         y: nodePosition.y,
       })
-      
+
       // Get the wrapper's bounding rect to adjust for its position
       const wrapperRect = reactFlowWrapper.current.getBoundingClientRect()
-      
+
       setPosition({
         x: wrapperRect.left + screenPos.x,
         y: wrapperRect.top + screenPos.y,
       })
     }
 
+    // Calculate position immediately
     updatePosition()
-    
+
     // Update position when viewport changes or node moves
     const interval = setInterval(updatePosition, 100)
 
@@ -85,6 +89,11 @@ export default function NodePopupMenu({ node, onClose, reactFlowWrapper, reactFl
     }
   }, [onClose])
 
+  // Don't render until position is calculated
+  if (!position) {
+    return null
+  }
+
   return (
     <div
       ref={menuRef}
@@ -106,10 +115,10 @@ export default function NodePopupMenu({ node, onClose, reactFlowWrapper, reactFl
         </button>
       </div>
       <div className="node-popup-menu-content">
-        {node.type === 'branching' && onOutputCountChange ? (() => {
+        {isBranchingNodeType(nodeType) && onOutputCountChange ? (() => {
           const handleCountChange = (newCount: number) => {
             if (newCount < outputCountConfig.min) return
-            if (newCount > outputCountConfig.max) return
+            if (outputCountConfig.max && newCount > outputCountConfig.max) return
             setOutputCount(newCount)
             onOutputCountChange(node.id, newCount)
           }
@@ -155,14 +164,14 @@ export default function NodePopupMenu({ node, onClose, reactFlowWrapper, reactFl
                 <button
                   type="button"
                   onClick={() => handleCountChange(outputCount + 1)}
-                  disabled={outputCount >= outputCountConfig.max}
+                  disabled={outputCountConfig.max ? outputCount >= outputCountConfig.max : false}
                   style={{
                     padding: '0.25rem 0.5rem',
                     border: '1px solid rgba(148, 163, 184, 0.7)',
                     borderRadius: '4px',
-                    background: outputCount >= outputCountConfig.max ? 'rgba(148, 163, 184, 0.2)' : 'rgba(15, 23, 42, 0.9)',
+                    background: outputCountConfig.max && outputCount >= outputCountConfig.max ? 'rgba(148, 163, 184, 0.2)' : 'rgba(15, 23, 42, 0.9)',
                     color: '#e5e7eb',
-                    cursor: outputCount >= outputCountConfig.max ? 'not-allowed' : 'pointer',
+                    cursor: outputCountConfig.max ? outputCount >= outputCountConfig.max ? 'not-allowed' : 'pointer' : 'pointer',
                   }}
                 >
                   +
@@ -172,7 +181,7 @@ export default function NodePopupMenu({ node, onClose, reactFlowWrapper, reactFl
           )
         })() : (
           <p style={{ padding: '1rem', color: 'rgba(148, 163, 184, 0.8)', fontSize: '0.9rem' }}>
-            {node.type === 'branchingOutput' ? 'Output node menu - placeholder' : 'Menu content will be added here'}
+            {isBranchingOutputNodeType(nodeType) ? 'Output node menu - placeholder' : 'Menu content will be added here'}
           </p>
         )}
       </div>

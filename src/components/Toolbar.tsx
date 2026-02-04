@@ -1,4 +1,4 @@
-import { useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from 'react'
 import NodeList from './NodeList'
 
 interface ToolbarProps {
@@ -13,6 +13,7 @@ interface ToolbarProps {
   showMinimap: boolean
   onMinimapToggle: () => void
   onExportJson: () => void
+  onValidate: () => void
 }
 
 export default function Toolbar({
@@ -27,10 +28,12 @@ export default function Toolbar({
   showMinimap,
   onMinimapToggle,
   onExportJson,
+  onValidate,
 }: ToolbarProps) {
   const [toolbarPosition, setToolbarPosition] = useState({ x: 16, y: 16 })
   const [toolbarSize, setToolbarSize] = useState({ width: 280, height: 260 })
   const [isToolbarMinimized, setIsToolbarMinimized] = useState(false)
+  const toolbarRef = useRef<HTMLDivElement>(null)
 
   // Fixed width based on button bar - buttons will wrap to new lines
   const TOOLBAR_FIXED_WIDTH = 280
@@ -46,7 +49,36 @@ export default function Toolbar({
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = moveEvent.clientX - startX
       const deltaY = moveEvent.clientY - startY
-      setToolbarPosition({ x: x + deltaX, y: y + deltaY })
+
+      // Calculate new position
+      let newX = x + deltaX
+      let newY = y + deltaY
+
+      // Get actual toolbar dimensions from the DOM element
+      const toolbarElement = toolbarRef.current
+      if (toolbarElement) {
+        const toolbarRect = toolbarElement.getBoundingClientRect()
+        const toolbarWidth = toolbarRect.width
+        const toolbarHeight = toolbarRect.height
+
+        // Get viewport dimensions
+        const viewportWidth = window.innerWidth
+        const viewportHeight = window.innerHeight
+
+        // Constrain position to keep toolbar within viewport
+        // Minimum position: 0, 0 (top-left corner)
+        // Maximum position: viewport - toolbar dimensions
+        const minX = 0
+        const minY = 0
+        const maxX = viewportWidth - toolbarWidth
+        const maxY = viewportHeight - toolbarHeight
+
+        // Clamp the position
+        newX = Math.max(minX, Math.min(maxX, newX))
+        newY = Math.max(minY, Math.min(maxY, newY))
+      }
+
+      setToolbarPosition({ x: newX, y: newY })
     }
 
     const handleMouseUp = () => {
@@ -57,6 +89,40 @@ export default function Toolbar({
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
   }
+
+  // Snap toolbar into viewport when unminimized
+  useEffect(() => {
+    if (!isToolbarMinimized && toolbarRef.current) {
+      // Wait for DOM to update after unminimizing
+      requestAnimationFrame(() => {
+        if (!toolbarRef.current) return
+
+        const toolbarElement = toolbarRef.current
+        const toolbarRect = toolbarElement.getBoundingClientRect()
+        const toolbarWidth = toolbarRect.width
+        const toolbarHeight = toolbarRect.height
+
+        const viewportWidth = window.innerWidth
+        const viewportHeight = window.innerHeight
+
+        let newX = toolbarPosition.x
+        let newY = toolbarPosition.y
+
+        // Check if toolbar is outside viewport and adjust if needed
+        const minX = 0
+        const minY = 0
+        const maxX = viewportWidth - toolbarWidth
+        const maxY = viewportHeight - toolbarHeight
+
+        // Clamp position to viewport bounds
+        if (newX < minX || newX > maxX || newY < minY || newY > maxY) {
+          newX = Math.max(minX, Math.min(maxX, newX))
+          newY = Math.max(minY, Math.min(maxY, newY))
+          setToolbarPosition({ x: newX, y: newY })
+        }
+      })
+    }
+  }, [isToolbarMinimized])
 
   const onToolbarResizeMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -85,6 +151,7 @@ export default function Toolbar({
 
   return (
     <div
+      ref={toolbarRef}
       className={`nodes-toolbar ${isToolbarMinimized ? 'nodes-toolbar--minimized' : ''}`}
       style={{
         transform: `translate(${toolbarPosition.x}px, ${toolbarPosition.y}px)`,
@@ -126,6 +193,14 @@ export default function Toolbar({
                 title="Export JSON to console"
               >
                 📋
+              </button>
+              <button
+                type="button"
+                className="toolbar-nav-button"
+                onClick={onValidate}
+                title="Validate flow"
+              >
+                ✓
               </button>
             </div>
           </section>

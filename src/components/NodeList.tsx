@@ -7,16 +7,15 @@ interface NodeListProps {
 export default function NodeList({ modules, onNodeDragStart, onSidebarNodeClick }: NodeListProps) {
   return (
     <div className="nodes-list">
-      {modules.map((t) => (
+      {modules.map((module) => (
         <div
-          key={t.name}
-          className="sidebar-node sidebar-node-a"
-          onDragStart={onNodeDragStart(t.name)}
-          onClick={() => onSidebarNodeClick(t.name)}
+          key={module.name}
+          className="sidebar-node"
+          onDragStart={onNodeDragStart(module.name)}
+          onClick={() => onSidebarNodeClick(module.name)}
           draggable
-          style={t.name === 'Branching' ? { fontWeight: '600', borderColor: 'rgba(96, 165, 250, 0.6)' } : {}}
         >
-          {t.name}
+          {module.name}
         </div>
       ))}
     </div>
