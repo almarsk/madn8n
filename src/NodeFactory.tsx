@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps, useReactFlow } from 'reactflow'
 import nodeConfigs, { type NodeConfig, type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES } from './nodeConfigs'
+import { useCallback } from 'react'
 
 interface NodeFactoryData extends NodeConfig {
     label: string
@@ -13,8 +14,8 @@ interface NodeFactoryData extends NodeConfig {
     parentNodeId?: string
 }
 
-function NodeFactory({ data, id }: NodeProps<NodeFactoryData>) {
-    const { getNodes, getEdges } = useReactFlow()
+function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
+    const { getNodes, getEdges, setNodes } = useReactFlow()
     const nodes = getNodes()
     const edges = getEdges()
     const currentNode = nodes.find(n => n.id === id)
@@ -45,14 +46,31 @@ function NodeFactory({ data, id }: NodeProps<NodeFactoryData>) {
     }
 
     // For branching output nodes, make the entire node clickable
-    const handleNodeClick = (e: React.MouseEvent) => {
+    // Also ensure only this node is selected, not the parent branching node
+    const handleNodeClick = useCallback((e: React.MouseEvent) => {
         if (isBranchingOutputNodeType(nodeType)) {
             e.stopPropagation()
+            
+            // Explicitly select only this node and deselect parent if it exists
+            if (data.parentNodeId) {
+                setNodes((nds) => {
+                    return nds.map((node) => {
+                        if (node.id === data.parentNodeId) {
+                            return { ...node, selected: false }
+                        }
+                        if (node.id === id) {
+                            return { ...node, selected: true }
+                        }
+                        return node
+                    })
+                })
+            }
+            
             if (data.onLabelClick) {
                 data.onLabelClick(id)
             }
         }
-    }
+    }, [nodeType, data.parentNodeId, data.onLabelClick, id, setNodes])
 
     // Determine if source handles should be shown
     // For single nodes: only show if not connected yet

@@ -68,7 +68,6 @@ export default function FlowCanvas({
       elementsSelectable={!isLocked}
       deleteKeyCode={!isLocked ? 'Backspace' : undefined}
       minZoom={0.02}
-      fitView
       proOptions={{ hideAttribution: true }}
       elevateNodesOnSelect={false}
       elevateEdgesOnSelect={false}

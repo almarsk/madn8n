@@ -489,8 +489,16 @@ function App() {
       setReactFlowInstance(instance)
       const viewport = instance.getViewport()
       setViewport(viewport)
+
+      // Only fit view on initial load if there are no nodes yet
+      if (nodes.length === 0) {
+        // Small delay to ensure ReactFlow is fully initialized
+        setTimeout(() => {
+          instance.fitView({ padding: 0.2, duration: 0 })
+        }, 100)
+      }
     },
-    []
+    [nodes.length]
   )
 
   // Wrap onEdgesChange to maintain compatibility
@@ -507,6 +515,7 @@ function App() {
       // Check if any branching nodes are being removed or moved
       const removedBranchingNodeIds = new Set<string>()
       const movedBranchingNodeIds = new Set<string>()
+      const selectedOutputNodeIds = new Set<string>()
 
       changes.forEach((change) => {
         if (change.type === 'remove') {
@@ -521,8 +530,36 @@ function App() {
           if (nodeType && isBranchingNodeType(nodeType)) {
             movedBranchingNodeIds.add(change.id)
           }
+        } else if (change.type === 'select' && change.selected) {
+          // Track when output nodes are selected
+          const node = nodes.find((n) => n.id === change.id)
+          const nodeType = node?.data?.nodeType as NodeType | undefined
+          if (nodeType && isBranchingOutputNodeType(nodeType)) {
+            selectedOutputNodeIds.add(change.id)
+          }
         }
       })
+
+      // If an output node is being selected, deselect its parent branching node
+      if (selectedOutputNodeIds.size > 0) {
+        const parentNodeIds = new Set<string>()
+        nodes.forEach((node) => {
+          if (selectedOutputNodeIds.has(node.id) && node.data?.parentNodeId) {
+            parentNodeIds.add(node.data.parentNodeId)
+          }
+        })
+
+        if (parentNodeIds.size > 0) {
+          // Add deselection changes for parent nodes
+          parentNodeIds.forEach((parentId) => {
+            changes.push({
+              id: parentId,
+              type: 'select',
+              selected: false,
+            })
+          })
+        }
+      }
 
       // If branching nodes are being removed, also remove their output nodes
       if (removedBranchingNodeIds.size > 0) {
