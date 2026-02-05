@@ -89,6 +89,38 @@
   resize: none;
   outline: none;
   overflow: auto;
+  tab-size: 4;
+  -moz-tab-size: 4;
+}
+
+/* Ensure highlight layer matches textarea exactly */
+.json-editor-highlight {
+  tab-size: 4;
+  -moz-tab-size: 4;
+  margin: 0;
+  border: none;
+  /* Hide scrollbar but allow scrolling */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.json-editor-highlight::-webkit-scrollbar {
+  display: none;
+}
+
+.json-editor-highlight span {
+  display: inline !important;
+  line-height: 1.5 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  vertical-align: baseline !important;
+  border: none !important;
+  box-sizing: border-box !important;
+  white-space: nowrap !important;
+  /* Prevent any visual offset */
+  position: relative;
+  top: 0;
+  left: 0;
 }
 
 .json-editor-textarea:focus {

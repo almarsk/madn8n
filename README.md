@@ -4,8 +4,6 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
 
 ## TODO
 
-- features
-    - autolayout
 - maintenance
     - refactoring
 - testing

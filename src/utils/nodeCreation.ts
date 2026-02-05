@@ -67,7 +67,7 @@ export const createNodeFromConfig = (
   nodeData.label = getNodeLabel(module, nodeData, nodeType)
 
   const node: Node = {
-    id: getId(),
+    id: getId(options.moduleName, nodeType),
     type: REACTFLOW_NODE_TYPE,
     position,
     data: nodeData,
@@ -123,7 +123,7 @@ export const createBranchingNodeWithOutputs = (
   // Use helper function to calculate height
   const branchingNodeHeight = calculateBranchingNodeHeight(outputCount, layoutConstants)
 
-  const branchingNodeId = getId()
+  const branchingNodeId = getId(moduleName, nodeType)
 
   const branchingNodeData: any = {
     ...branchingConfig,
@@ -194,7 +194,7 @@ export const createBranchingNodeWithOutputs = (
     const outputPosition = calculateOutputNodePosition(position, i, layoutConstants)
 
     const outputNode: Node = {
-      id: getId(),
+      id: getId(moduleName, outputNodeType),
       type: REACTFLOW_NODE_TYPE,
       position: outputPosition,
       data: outputNodeData,

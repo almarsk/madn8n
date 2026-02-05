@@ -1,0 +1,300 @@
+{
+    "account_id": "",
+    "current_bot_version_id": "",
+    "created_at": "",
+    "id": "",
+    "labels": [],
+    "current_bot_version": {
+        "description": "Complex test flow with multiple branching nodes and loops",
+        "permanent": true,
+        "task_values": {},
+        "language": "en",
+        "channel": "voice",
+        "bot_id": "",
+        "mchannels_bot_id": "",
+        "created_at": "",
+        "id": "",
+        "updated_at": "",
+        "name": "Complex Test Flow",
+        "dialog": {
+            "modules": {
+                "branching_1": {
+                    "type": "Branching",
+                    "params": {
+                        "outputs": [
+                            "Option A",
+                            "Option B",
+                            "Option C"
+                        ]
+                    },
+                    "handlers": {
+                        "on_0": "type_1_2",
+                        "on_1": "type_1_3",
+                        "on_2": "type_1_4"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_2": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Process A",
+                        "how": 1,
+                        "why": true
+                    },
+                    "handlers": {
+                        "node_exit": "branching_2"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_3": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Process B",
+                        "how": 2,
+                        "why": false
+                    },
+                    "handlers": {
+                        "node_exit": "branching_3"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_4": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Process C",
+                        "how": 3,
+                        "why": true
+                    },
+                    "handlers": {
+                        "node_exit": "type_1_5"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "branching_2": {
+                    "type": "Branching",
+                    "params": {
+                        "outputs": [
+                            "Path 1",
+                            "Path 2"
+                        ]
+                    },
+                    "handlers": {
+                        "on_0": "type_1_6",
+                        "on_1": "type_1_7"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "branching_3": {
+                    "type": "Branching",
+                    "params": {
+                        "outputs": [
+                            "Route X",
+                            "Route Y",
+                            "Route Z"
+                        ]
+                    },
+                    "handlers": {
+                        "on_0": "type_1_8",
+                        "on_1": "type_1_9",
+                        "on_2": "branching_4"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "branching_4": {
+                    "type": "Branching",
+                    "params": {
+                        "outputs": [
+                            "Final A",
+                            "Final B"
+                        ]
+                    },
+                    "handlers": {
+                        "on_0": "type_1_10",
+                        "on_1": "branching_1"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_5": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Continue C",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {
+                        "node_exit": "type_1_11"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_6": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Path 1 Handler",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {
+                        "node_exit": "type_1_12"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_7": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Path 2 Handler",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {
+                        "node_exit": "branching_2"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_8": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Route X Handler",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {
+                        "node_exit": "type_1_13"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_9": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Route Y Handler",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {
+                        "node_exit": "type_1_14"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_10": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Final A Handler",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {
+                        "node_exit": "type_1_15"
+                    },
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_11": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "End C",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {},
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_12": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "End Path 1",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {},
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_13": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "End Route X",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {},
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_14": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "End Route Y",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {},
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                },
+                "type_1_15": {
+                    "type": "Type 1",
+                    "params": {
+                        "what": "Final End",
+                        "how": 0,
+                        "why": false
+                    },
+                    "handlers": {},
+                    "source": {
+                        "path": "",
+                        "unpack_params": true
+                    }
+                }
+            },
+            "root_module": "branching_1",
+            "stickers": {},
+            "initial_user_response_timeout": 1800
+        },
+        "omnichannel_config": {}
+    }
+}

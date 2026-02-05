@@ -74,25 +74,6 @@ export default function HierarchicalGridBackground({ zoom }: HierarchicalGridBac
       return { size: levelWithDistance.size, gap: levelWithDistance.gap, optimalZoom: levelWithDistance.optimalZoom, opacity }
     })
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        location:'HierarchicalGridBackground.tsx:52',
-        message:'grid opacity computed',
-        data:{
-          zoom,
-          levels: result.map(l => ({ size: l.size, gap: l.gap, opacity: l.opacity }))
-        },
-        timestamp:Date.now(),
-        sessionId:'debug-session',
-        runId:'run1',
-        hypothesisId:'A'
-      })
-    }).catch(()=>{})
-    // #endregion
-
     return result
   }, [zoom])
 

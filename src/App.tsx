@@ -5,7 +5,7 @@ import modules from './modules'
 import nodeConfigs, { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES, canOutputNodeBeDeleted } from './nodeConfigs'
 import { useHistory } from './hooks/useHistory'
 import { createNodeFromConfig, createBranchingNodeWithOutputs } from './utils/nodeCreation'
-import { getNodeLabel } from './utils/nodeUtils'
+import { getNodeLabel, getId } from './utils/nodeUtils'
 import { useValidation } from './hooks/useValidation'
 import { getBranchingLayoutConstants, calculateOutputNodePosition, repositionOutputNodes, calculateBranchingNodeHeight, updateBranchingNodeHeight } from './utils/branchingNodeHelpers'
 import { exportFlowToJson } from './utils/exportHelpers'
@@ -616,16 +616,16 @@ function App() {
           // Position at about 40% from left (closer to center than before)
           const targetScreenX = bounds.width * 0.4
           const targetScreenY = bounds.height * (1 / 3)
-          
+
           // Use default zoom 0.7
           const zoom = 0.7
           const flowX = startNode.position.x
           const flowY = startNode.position.y
-          
+
           // Calculate viewport offset needed to position Start node at target screen position
           const viewportX = -flowX * zoom + targetScreenX
           const viewportY = -flowY * zoom + targetScreenY
-          
+
           instance.setViewport({ x: viewportX, y: viewportY, zoom, duration })
         }
       } else if (currentNodes.length === 0) {
@@ -645,21 +645,26 @@ function App() {
       const viewport = instance.getViewport()
       setViewport(viewport)
 
-      // Ensure start node always exists
-      setNodes((nds) => {
-        const hasStartNode = nds.some((n) => n.data?.moduleName === 'Start')
-        if (!hasStartNode) {
-          const startModule = modules.find((m) => m.name === 'Start')
-          if (startModule) {
-            const bounds = reactFlowWrapper.current?.getBoundingClientRect()
-            if (bounds) {
-              // Position start node closer to middle but still on left side (same as default view)
-              const targetX = bounds.width * 0.4
-              const targetY = bounds.height * (1 / 3)
-              const position = instance.screenToFlowPosition({
-                x: targetX,
-                y: targetY,
-              })
+      // Set default zoom and position first, then create start node at correct position
+      const bounds = reactFlowWrapper.current?.getBoundingClientRect()
+      if (bounds) {
+        // Calculate target position for start node
+        const targetScreenX = bounds.width * 0.4
+        const targetScreenY = bounds.height * (1 / 3)
+        const zoom = 0.7
+
+        // Set viewport immediately to prevent initial render hiccup
+        // We'll position the start node at (0, 0) initially and adjust viewport
+        instance.setViewport({ x: targetScreenX, y: targetScreenY, zoom, duration: 0 })
+
+        // Now create start node at flow position (0, 0) which will appear at target screen position
+        setNodes((nds) => {
+          const hasStartNode = nds.some((n) => n.data?.moduleName === 'Start')
+          if (!hasStartNode) {
+            const startModule = modules.find((m) => m.name === 'Start')
+            if (startModule) {
+              // Position at (0, 0) in flow coordinates - viewport is already set
+              const position = { x: 0, y: 0 }
               const startNode = createNodeFromConfig(startModule.type as NodeType, position, {
                 moduleName: 'Start',
                 connectingFrom: null,
@@ -667,16 +672,9 @@ function App() {
               return [...nds, startNode]
             }
           }
-        }
-        return nds
-      })
-
-      // Set default zoom and position so Start node appears at 2/3 top-right of screen
-      setTimeout(() => {
-        // Get current nodes from ReactFlow instance to ensure we have the latest
-        const currentNodes = instance.getNodes()
-        positionStartNodeAtDefaultView(instance, currentNodes, 0)
-      }, 100)
+          return nds
+        })
+      }
     },
     [setNodes, positionStartNodeAtDefaultView]
   )
@@ -958,6 +956,24 @@ function App() {
 
             // Reposition remaining output nodes - this will use the updated outputIndex values
             updatedNodes = repositionOutputNodes(updatedNodes, parentId, layoutConstants)
+
+            // Select the node above the deleted one if it exists
+            if (deletedIndices.length > 0 && sortedRemaining.length > 0) {
+              // Find the highest deleted index
+              const highestDeletedIndex = Math.max(...deletedIndices)
+              // Select the node at the position of the deleted node (or the last one if deleted was last)
+              const nodeToSelectIndex = Math.min(highestDeletedIndex, sortedRemaining.length - 1)
+              if (nodeToSelectIndex >= 0 && nodeToSelectIndex < sortedRemaining.length) {
+                const nodeToSelect = sortedRemaining[nodeToSelectIndex]
+                const selectIndex = updatedNodes.findIndex((n) => n.id === nodeToSelect.id)
+                if (selectIndex >= 0) {
+                  updatedNodes[selectIndex] = {
+                    ...updatedNodes[selectIndex],
+                    selected: true,
+                  }
+                }
+              }
+            }
           })
 
           return updatedNodes
@@ -1047,13 +1063,19 @@ function App() {
     setMenuPosition(null)
   }, [])
 
+  // Helper to show banner message (auto-dismisses after 5 seconds)
+  // Defined early so it can be used in handlers below
+  const showBannerMessage = useCallback((message: string, isValid: boolean | null = true) => {
+    setValidationStatus({ isValid, message })
+  }, [])
+
   const handleOpenFlowConfigMenu = useCallback(() => {
     // Close all other menus first
     setOpenMenuNodeId(null)
     setMenuPosition(null)
     setIsStickerMenuOpen(false)
     setStickerMenuPosition(null)
-    
+
     // Open flow config menu immediately
     setIsFlowConfigMenuOpen(true)
     setFlowConfigMenuPosition(null) // Will be auto-positioned next to toolbar
@@ -1124,8 +1146,74 @@ function App() {
     // Don't save history for param changes - only node add/remove and connections are in history
     // Also preserve viewport position to prevent view from jumping
     const currentViewport = reactFlowInstance?.getViewport()
-    
+
     setNodes((nds) => {
+      const node = nds.find((n) => n.id === nodeId)
+      if (!node) return nds
+
+      const nodeType = node.data?.nodeType as NodeType | undefined
+      const isOutputNode = nodeType && isBranchingOutputNodeType(nodeType)
+      const parentNodeId = node.data?.parentNodeId
+
+      // If this is an output node and the value is being updated, also update parent's listParam array
+      if (isOutputNode && parentNodeId && updatedData.params?.value !== undefined) {
+        const parentNode = nds.find((n) => n.id === parentNodeId)
+        if (parentNode) {
+          const module = parentNode.data?.moduleName ? modules.find((m) => m.name === parentNode.data.moduleName) : undefined
+          if (module?.outputConfig?.type === 'listParam') {
+            const listParamName = module.outputConfig.listParamName
+            const outputIndex = typeof node.data?.outputIndex === 'number' ? node.data.outputIndex : 0
+            const currentArray = Array.isArray(parentNode.data?.params?.[listParamName])
+              ? [...parentNode.data.params[listParamName]]
+              : []
+
+            // Ensure array is long enough
+            while (currentArray.length <= outputIndex) {
+              currentArray.push('')
+            }
+
+            // Update the value at the output index
+            currentArray[outputIndex] = updatedData.params.value
+
+            // Update parent node's params
+            return nds.map((n) => {
+              if (n.id === parentNodeId) {
+                return {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    params: {
+                      ...n.data.params,
+                      [listParamName]: currentArray,
+                    },
+                  },
+                }
+              }
+              if (n.id === nodeId) {
+                const updatedNode = {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    ...updatedData,
+                  },
+                }
+
+                // Recalculate label if module info is available
+                if (updatedNode.data.moduleName) {
+                  const module = modules.find((m) => m.name === updatedNode.data.moduleName)
+                  const nodeType = updatedNode.data?.nodeType as NodeType | undefined
+                  updatedNode.data.label = getNodeLabel(module, updatedNode.data, nodeType)
+                }
+
+                return updatedNode
+              }
+              return n
+            })
+          }
+        }
+      }
+
+      // Regular update for non-output nodes or non-value updates
       return nds.map((node) => {
         if (node.id === nodeId) {
           const updatedNode = {
@@ -1148,7 +1236,7 @@ function App() {
         return node
       })
     })
-    
+
     // Restore viewport position after update to prevent view from jumping
     if (currentViewport && reactFlowInstance) {
       requestAnimationFrame(() => {
@@ -1241,7 +1329,7 @@ function App() {
         // Update branching node params and outputCount
         const layoutConstants = getBranchingLayoutConstants()
         const newOutputCount = remainingOutputNodes.length
-        
+
         const branchingIndex = updatedNodes.findIndex((n) => n.id === parentId)
         if (branchingIndex >= 0) {
           updatedNodes[branchingIndex] = {
@@ -1330,23 +1418,23 @@ function App() {
     // Important: Preserve node positions from current canvas to avoid layout changes
     const reconstructedNodes: Node[] = reactFlowData.nodes.map((node) => {
       const originalNode = nodes.find((n) => n.id === node.id)
-      
+
       // Deep merge data: start with original node data, then override with new data
       // This ensures all properties (like params, outputIndex, parentNodeId, etc.) are preserved
-      const mergedData = originalNode?.data 
+      const mergedData = originalNode?.data
         ? { ...originalNode.data, ...node.data }
         : { ...node.data }
-      
+
       // Ensure connectingFrom is preserved
       if (originalNode?.data?.connectingFrom !== undefined) {
         mergedData.connectingFrom = originalNode.data.connectingFrom
       } else {
         mergedData.connectingFrom = null
       }
-      
+
       // Preserve position from original node if it exists, otherwise use from JSON
       const preservedPosition = originalNode?.position || node.position || { x: 0, y: 0 }
-      
+
       // Ensure node has all required properties
       const reconstructed: Node = {
         id: node.id,
@@ -1360,15 +1448,15 @@ function App() {
         width: node.width || node.style?.width || originalNode?.width,
         height: node.height || node.style?.height || originalNode?.height,
       }
-      
+
       return reconstructed
     })
-    
+
     // Preserve all edges with all properties including markerEnd (arrow heads), style, etc.
     const preservedEdges = reactFlowData.edges.map((edge) => {
       // Find original edge to preserve all properties
       const originalEdge = edges.find((e) => e.id === edge.id || (e.source === edge.source && e.target === edge.target))
-      
+
       // Default markerEnd if missing
       const defaultMarkerEnd = {
         type: MarkerType.ArrowClosed,
@@ -1376,13 +1464,13 @@ function App() {
         height: 20,
         color: 'rgba(148, 163, 184, 0.8)',
       }
-      
+
       // Default style if missing
       const defaultStyle = {
         strokeWidth: 2,
         stroke: 'rgba(148, 163, 184, 0.8)',
       }
-      
+
       return {
         ...edge, // Start with edge from JSON (has updated source/target)
         // Preserve all ReactFlow edge properties from original or from JSON
@@ -1402,7 +1490,7 @@ function App() {
         zIndex: edge.zIndex ?? originalEdge?.zIndex,
       }
     })
-    
+
     // Update branching node heights based on their output nodes
     let finalNodes = reconstructedNodes
     const layoutConstants = getBranchingLayoutConstants()
@@ -1412,7 +1500,7 @@ function App() {
         finalNodes = updateBranchingNodeHeight(finalNodes, node.id, layoutConstants)
       }
     })
-    
+
     // Reposition output nodes to ensure correct positions
     reconstructedNodes.forEach((node) => {
       const nodeType = node.data?.nodeType as NodeType | undefined
@@ -1421,8 +1509,13 @@ function App() {
       }
     })
 
+    // Set nodes first, then edges in next tick to ensure ReactFlow processes nodes first
     setNodes(finalNodes)
-    setEdges(preservedEdges)
+
+    // Use requestAnimationFrame to ensure nodes are processed before edges
+    requestAnimationFrame(() => {
+      setEdges(preservedEdges)
+    })
 
     // Don't close editor - let user continue editing
     // setIsJsonEditorOpen(false)
@@ -1512,9 +1605,320 @@ function App() {
     }
   }, [history, isLocked, setNodes, setEdges, onConnectEnd])
 
-  // Keyboard shortcuts for undo/redo
+  // Duplicate selected nodes
+  const handleDuplicateNodes = useCallback(() => {
+    if (isLocked) return
+
+    saveHistoryBeforeChange()
+
+    setNodes((nds) => {
+      // Helper function to check if a node can be duplicated
+      const canNodeBeDuplicated = (node: Node): boolean => {
+        const moduleName = node.data?.moduleName
+        if (!moduleName) return true // Default to true if no module name
+
+        const module = modules.find((m) => m.name === moduleName)
+        if (!module) return true // Default to true if module not found
+
+        // Check if module explicitly disallows duplication
+        if (module.canDuplicate === false) return false
+
+        // For output nodes, check if parent is an internal branching node
+        if (node.data?.parentNodeId) {
+          const parentNode = nds.find((n) => n.id === node.data.parentNodeId)
+          if (parentNode) {
+            const parentModuleName = parentNode.data?.moduleName
+            if (parentModuleName) {
+              const parentModule = modules.find((m) => m.name === parentModuleName)
+              if (parentModule) {
+                // If parent has internal outputConfig or canDuplicate is false, don't duplicate output
+                if (
+                  parentModule.canDuplicate === false ||
+                  (parentModule.outputConfig?.type === 'internal')
+                ) {
+                  return false
+                }
+              }
+            }
+          }
+        }
+
+        return true
+      }
+
+      // Get all selected nodes and filter out those that can't be duplicated
+      const selectedNodes = nds.filter((n) => n.selected && canNodeBeDuplicated(n))
+      if (selectedNodes.length === 0) return nds
+
+      // Check if any selected node is an output node from a listParam branching node
+      // If so, handle it specially by adding it to the parent instead of duplicating separately
+      const outputNodeFromListParam = selectedNodes.find((node) => {
+        if (!node.data?.parentNodeId) return false
+        const nodeType = node.data?.nodeType as NodeType | undefined
+        if (!nodeType || !isBranchingOutputNodeType(nodeType)) return false
+
+        const parentNode = nds.find((n) => n.id === node.data.parentNodeId)
+        if (!parentNode) return false
+
+        const parentModuleName = parentNode.data?.moduleName
+        if (!parentModuleName) return false
+
+        const parentModule = modules.find((m) => m.name === parentModuleName)
+        if (!parentModule || parentModule.outputConfig?.type !== 'listParam') return false
+        // Check if the module has duplicateOutputAddsToParent enabled (default: true)
+        return parentModule.duplicateOutputAddsToParent !== false
+      })
+
+      // Special handling for output nodes from listParam branching nodes
+      if (outputNodeFromListParam && selectedNodes.length === 1) {
+        const outputNode = outputNodeFromListParam
+        const parentNode = nds.find((n) => n.id === outputNode.data?.parentNodeId)
+        if (!parentNode) return nds
+
+        const module = parentNode.data?.moduleName ? modules.find((m) => m.name === parentNode.data.moduleName) : undefined
+        if (!module?.outputConfig || module.outputConfig.type !== 'listParam') return nds
+
+        const listParamName = module.outputConfig.listParamName
+        const currentArray = Array.isArray(parentNode.data?.params?.[listParamName])
+          ? [...parentNode.data.params[listParamName]]
+          : []
+
+        // Get the value from the output node being duplicated
+        const duplicatedValue = outputNode.data?.params?.value ?? ''
+
+        // Add new value to array (duplicate the value)
+        const updatedArray = [...currentArray, duplicatedValue]
+
+        // Update the branching node's params
+        let updatedNodes = nds.map((node) => {
+          if (node.id === parentNode.id) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                params: {
+                  ...node.data.params,
+                  [listParamName]: updatedArray,
+                },
+              },
+            }
+          }
+          return node
+        })
+
+        // Get existing output nodes
+        const existingOutputNodes = updatedNodes.filter((n) => {
+          const nType = n.data?.nodeType as NodeType | undefined
+          return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === parentNode.id
+        })
+
+        const layoutConstants = getBranchingLayoutConstants()
+        const newIndex = existingOutputNodes.length
+        const branchingPos = parentNode.position || { x: 0, y: 0 }
+        const newOutputCount = newIndex + 1
+
+        // Get the output node type from branching node config
+        const branchingNodeType = parentNode.data?.nodeType as NodeType | undefined
+        const branchingConfig = branchingNodeType ? nodeConfigs[branchingNodeType] : undefined
+        const outputNodeType = branchingConfig?.outputNodeType
+
+        if (!outputNodeType) {
+          console.error(`Branching node ${branchingNodeType} does not specify outputNodeType`)
+          return nds
+        }
+
+        // Create new output node
+        const newOutputNode = createNodeFromConfig(outputNodeType, calculateOutputNodePosition(branchingPos, newIndex, layoutConstants), {
+          moduleName: parentNode.data?.moduleName,
+          parentNodeId: parentNode.id,
+          connectingFrom: null,
+          params: { value: duplicatedValue },
+          outputIndex: newIndex,
+        })
+        // Set label - use value if available, otherwise "_"
+        newOutputNode.data.label = (duplicatedValue !== null && duplicatedValue !== undefined && duplicatedValue !== '') ? String(duplicatedValue) : '_'
+
+        // Add the new output node first, then reposition (so repositionOutputNodes sees all nodes)
+        updatedNodes = updatedNodes.concat(newOutputNode)
+
+        // Reposition all output nodes to ensure correct order and update height
+        updatedNodes = repositionOutputNodes(updatedNodes, parentNode.id, layoutConstants)
+
+        // Deselect all nodes and select the new output node
+        updatedNodes = updatedNodes.map((node) => ({
+          ...node,
+          selected: node.id === newOutputNode.id,
+        }))
+
+        return updatedNodes
+      }
+
+      // Regular duplication logic for other nodes
+      // For branching nodes, also include their output nodes
+      const nodesToDuplicate: Node[] = []
+      const processedIds = new Set<string>()
+
+      selectedNodes.forEach((node) => {
+        if (processedIds.has(node.id)) return
+        processedIds.add(node.id)
+
+        const nodeType = node.data?.nodeType as NodeType | undefined
+        if (nodeType && isBranchingNodeType(nodeType)) {
+          // Add branching node
+          nodesToDuplicate.push(node)
+          // Add all output nodes for this branching node (only if they can be duplicated)
+          const outputNodes = nds.filter((n) => {
+            const nType = n.data?.nodeType as NodeType | undefined
+            return (
+              nType &&
+              isBranchingOutputNodeType(nType) &&
+              n.data?.parentNodeId === node.id &&
+              canNodeBeDuplicated(n)
+            )
+          })
+          outputNodes.forEach((outputNode) => {
+            if (!processedIds.has(outputNode.id)) {
+              nodesToDuplicate.push(outputNode)
+              processedIds.add(outputNode.id)
+            }
+          })
+        } else {
+          // Regular node - check if it's an output node that's already handled
+          if (node.data?.parentNodeId && processedIds.has(node.data.parentNodeId)) {
+            return // Skip - parent is being duplicated
+          }
+          nodesToDuplicate.push(node)
+        }
+      })
+
+      if (nodesToDuplicate.length === 0) return nds
+
+      // Calculate offset (to the right and down) - same as overlap offset when adding nodes
+      const offsetX = 30
+      const offsetY = 30
+
+      // Create ID mapping for duplicated nodes
+      const idMap = new Map<string, string>()
+      nodesToDuplicate.forEach((node) => {
+        idMap.set(node.id, getId(node.data?.moduleName, node.data?.nodeType as string))
+      })
+
+      // Create duplicated nodes
+      const duplicatedNodes: Node[] = nodesToDuplicate.map((node) => {
+        const newNodeId = idMap.get(node.id)!
+        const nodeType = node.data?.nodeType as NodeType | undefined
+
+        // Update parentNodeId if this is an output node
+        const newParentNodeId = node.data?.parentNodeId
+          ? idMap.get(node.data.parentNodeId) || node.data.parentNodeId
+          : undefined
+
+        return {
+          ...node,
+          id: newNodeId,
+          position: {
+            x: node.position.x + offsetX,
+            y: node.position.y + offsetY,
+          },
+          selected: true, // Select the duplicated nodes
+          data: {
+            ...node.data,
+            ...(newParentNodeId && { parentNodeId: newParentNodeId }),
+          },
+        }
+      })
+
+      // Calculate max z-index for new nodes
+      const maxZIndex = nds.reduce((max, n) => {
+        const z = typeof n.zIndex === 'number' ? n.zIndex : 0
+        return Math.max(max, z)
+      }, highestZIndexRef.current)
+      const baseZIndex = maxZIndex + 1
+
+      // Apply z-index to duplicated nodes
+      const duplicatedNodesWithZIndex = duplicatedNodes.map((node, idx) => ({
+        ...node,
+        zIndex: baseZIndex + idx,
+      }))
+
+      // Deselect all existing nodes
+      const clearedNodes = nds.map((node) => ({ ...node, selected: false }))
+
+      // Update highest z-index ref
+      highestZIndexRef.current = baseZIndex + duplicatedNodes.length
+
+      return clearedNodes.concat(duplicatedNodesWithZIndex)
+    })
+  }, [isLocked, saveHistoryBeforeChange, setNodes])
+
+  // Keyboard shortcuts for undo/redo, duplicate, and navigation
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      // Ctrl+E: Jump to next node if a node with outgoing edge is selected
+      if ((event.ctrlKey || event.metaKey) && event.key === 'e') {
+        event.preventDefault()
+        const selectedNode = nodes.find(n => n.selected)
+        if (selectedNode && reactFlowInstance) {
+          // Find outgoing edges from selected node (or from its output nodes if it's a branching node)
+          let outgoingEdges = edges.filter(e => e.source === selectedNode.id)
+
+          // If no direct edges, check if it's a branching node and look for edges from its output nodes
+          if (outgoingEdges.length === 0) {
+            const outputNodes = nodes.filter(n => n.data?.parentNodeId === selectedNode.id)
+            for (const outputNode of outputNodes) {
+              const outputEdges = edges.filter(e => e.source === outputNode.id)
+              if (outputEdges.length > 0) {
+                outgoingEdges = outputEdges
+                break
+              }
+            }
+          }
+
+          if (outgoingEdges.length > 0) {
+            // Get the first target node
+            let targetNodeId = outgoingEdges[0].target
+            let targetNode = nodes.find(n => n.id === targetNodeId)
+
+            // If target is a branching output node, use its parent instead
+            if (targetNode) {
+              const targetType = targetNode.data?.nodeType as NodeType | undefined
+              if (targetType && isBranchingOutputNodeType(targetType)) {
+                const parentId = targetNode.data?.parentNodeId as string | undefined
+                if (parentId) {
+                  targetNodeId = parentId
+                  targetNode = nodes.find(n => n.id === parentId)
+                }
+              }
+            }
+
+            if (targetNode) {
+              // Deselect current node and select target node
+              setNodes((nds) =>
+                nds.map((n) => ({
+                  ...n,
+                  selected: n.id === targetNodeId,
+                }))
+              )
+              // Center view on target node
+              const targetPos = targetNode.position
+              const targetDims = {
+                width: targetNode.width || 220,
+                height: targetNode.height || 80,
+              }
+              const bounds = reactFlowWrapper.current?.getBoundingClientRect()
+              if (bounds) {
+                const zoom = reactFlowInstance.getViewport().zoom
+                const centerX = targetPos.x + targetDims.width / 2
+                const centerY = targetPos.y + targetDims.height / 2
+                const viewportX = -centerX * zoom + bounds.width / 2
+                const viewportY = -centerY * zoom + bounds.height / 2
+                reactFlowInstance.setViewport({ x: viewportX, y: viewportY, zoom })
+              }
+            }
+          }
+        }
+        return
+      }
       // Don't trigger if user is typing in an input field
       const target = event.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
@@ -1531,13 +1935,18 @@ function App() {
         event.preventDefault()
         handleRedo()
       }
+      // Check for Ctrl+D (or Cmd+D on Mac) for duplicate
+      else if ((event.ctrlKey || event.metaKey) && event.key === 'd' && !event.shiftKey) {
+        event.preventDefault()
+        handleDuplicateNodes()
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [handleUndo, handleRedo])
+  }, [handleUndo, handleRedo, handleDuplicateNodes, nodes, edges, reactFlowInstance, setNodes])
 
   const handleAddOutput = useCallback((nodeId: string) => {
     // Save history before adding output node
@@ -1627,10 +2036,10 @@ function App() {
 
       // Add the new output node
       const nodesWithNewOutput = updatedNodes.concat(outputNode)
-      
+
       // Update branching node height using helper function
       const updatedWithHeight = updateBranchingNodeHeight(nodesWithNewOutput, nodeId, layoutConstants)
-      
+
       // Also update outputCount in data
       return updatedWithHeight.map((node) =>
         node.id === nodeId
@@ -1822,7 +2231,17 @@ function App() {
               saveHistoryBeforeChange('other')
             }
             setNodes((current) => {
-              const laidOut = autoLayout(current, edges)
+              const { nodes: laidOut, edges: updatedEdges } = autoLayout(current, edges)
+
+              // Update edges if handles were changed (check if any edge differs)
+              const edgesChanged = updatedEdges.some((e, i) =>
+                !edges[i] ||
+                e.sourceHandle !== edges[i].sourceHandle ||
+                e.targetHandle !== edges[i].targetHandle
+              )
+              if (edgesChanged) {
+                setEdges(updatedEdges)
+              }
 
               // Calculate bounds of laid out nodes
               if (laidOut.length > 0 && reactFlowInstance) {
@@ -1876,21 +2295,53 @@ function App() {
         <FlowCanvas
           nodes={nodesWithHandlers}
           edges={edges.map((edge) => {
-            // Determine z-index based on source node
-            // If source is an output node, use the same z-index as the output node
+            // Determine z-index based on source and target nodes
+            // Edges should be above branching nodes (zIndex 10) and output nodes (zIndex 11)
             const sourceNode = nodes.find((n) => n.id === edge.source)
+            const targetNode = nodes.find((n) => n.id === edge.target)
             const sourceNodeType = sourceNode?.data?.nodeType as NodeType | undefined
+            const targetNodeType = targetNode?.data?.nodeType as NodeType | undefined
             let edgeZIndex = edge.zIndex ?? 2
 
+            // If source is an output node, edge must be above both the output node (11) and parent branching node (10)
             if (sourceNode && sourceNodeType && isBranchingOutputNodeType(sourceNodeType)) {
-              // Use the same z-index as the output node
-              edgeZIndex = sourceNode.zIndex ?? 11
+              // Edge needs to be above the output node, so use output node z-index + 1
+              edgeZIndex = (sourceNode.zIndex ?? 11) + 1
+              // Also check if there's a parent branching node and ensure we're above it
+              const parentNodeId = sourceNode.data?.parentNodeId as string | undefined
+              if (parentNodeId) {
+                const parentNode = nodes.find((n) => n.id === parentNodeId)
+                if (parentNode) {
+                  edgeZIndex = Math.max(edgeZIndex, (parentNode.zIndex ?? 10) + 1)
+                }
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'App.tsx:2310', message: 'Edge from output node z-index calculation', data: { edgeId: edge.id, sourceId: edge.source, parentNodeId, sourceNodeZIndex: sourceNode.zIndex, parentNodeZIndex: parentNode?.zIndex, calculatedEdgeZIndex: edgeZIndex }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
+                // #endregion
+              }
+            }
+            // If target is a branching node, ensure edge is above it
+            else if (targetNode && targetNodeType && isBranchingNodeType(targetNodeType)) {
+              edgeZIndex = Math.max(edgeZIndex, (targetNode.zIndex ?? 10) + 1)
+            }
+            // If source is a branching node, ensure edge is above it
+            else if (sourceNode && sourceNodeType && isBranchingNodeType(sourceNodeType)) {
+              edgeZIndex = Math.max(edgeZIndex, (sourceNode.zIndex ?? 10) + 1)
             }
 
-            return {
+            const edgeWithZIndex = {
               ...edge,
               zIndex: edgeZIndex,
             }
+
+            // Set data attribute for CSS z-index control if needed
+            if (edgeZIndex > 10) {
+              (edgeWithZIndex as any).data = {
+                ...(edge.data || {}),
+                zIndex: edgeZIndex,
+              }
+            }
+
+            return edgeWithZIndex
           })}
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}

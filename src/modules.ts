@@ -47,6 +47,10 @@ export interface Module {
     showInToolbar?: boolean
     // Whether this module's nodes should show the menu icon (default: true)
     showMenu?: boolean
+    // Whether nodes of this module can be duplicated (default: true)
+    canDuplicate?: boolean
+    // For listParam branching nodes: whether duplicating an output node should add it to the parent (default: true)
+    duplicateOutputAddsToParent?: boolean
 }
 
 // Default modules - these are always available
@@ -71,7 +75,7 @@ const defaultModules: Module[] = [
             }
         ],
         "labelParam": "what",
-        "handlers": ["node_exit"],
+        "handlers": ["on_1"],
         "source": {
             "path": "",
             "unpack_params": true
@@ -117,6 +121,7 @@ const defaultModules: Module[] = [
             "path": "",
             "unpack_params": true
         },
+        "canDuplicate": false, // Internal branching nodes and their outputs cannot be duplicated
         "documentation": "Placeholder documentation for Branching2 module"
     },
     {
@@ -197,6 +202,7 @@ const defaultModules: Module[] = [
         },
         "showInToolbar": false, // Start node should not appear in toolbar
         "showMenu": false, // Start node should not show menu icon
+        "canDuplicate": false, // Start node cannot be duplicated
         "documentation": "Start node marks the beginning of the flow"
     }
 ]

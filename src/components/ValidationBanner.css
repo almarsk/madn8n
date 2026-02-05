@@ -37,9 +37,15 @@
   color: #ffffff;
 }
 
+.validation-banner--info {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.95), rgba(37, 99, 235, 0.95));
+  border: 1px solid rgba(59, 130, 246, 0.6);
+  color: #ffffff;
+}
+
 .validation-banner-content {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.75rem;
   font-size: 0.875rem;
   font-weight: 500;
@@ -50,7 +56,6 @@
   font-size: 1.2rem;
   font-weight: bold;
   flex-shrink: 0;
-  margin-top: 0.1rem;
 }
 
 .validation-banner-message {

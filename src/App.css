@@ -947,6 +947,16 @@
   pointer-events: all;
 }
 
+/* Ensure edges from output nodes appear above branching nodes */
+/* ReactFlow renders edges in SVG, so we need to ensure edges container is above nodes */
+.react-flow__edges {
+  z-index: 12 !important;
+}
+
+.react-flow__nodes {
+  z-index: 10 !important;
+}
+
 .react-flow__edge-path {
   stroke-width: 2 !important;
   stroke: rgba(148, 163, 184, 0.8) !important;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import './ValidationBanner.css'
 
 interface ValidationBannerProps {
@@ -10,6 +10,36 @@ interface ValidationBannerProps {
 export default function ValidationBanner({ isValid, message, onDismiss }: ValidationBannerProps) {
   const [isVisible, setIsVisible] = useState(false)
   const [shouldRender, setShouldRender] = useState(false)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleDismiss = useCallback(() => {
+    setIsVisible(false)
+    // Wait for fade out animation to complete before removing from DOM
+    setTimeout(() => {
+      setShouldRender(false)
+      if (onDismiss) {
+        onDismiss()
+      }
+    }, 300) // Match the fade-out animation duration
+  }, [onDismiss])
+
+  const startTimeout = useCallback(() => {
+    // Clear any existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+    }
+    // Set new timeout for 5 seconds
+    timeoutRef.current = setTimeout(() => {
+      handleDismiss()
+    }, 5000)
+  }, [handleDismiss])
+
+  const pauseTimeout = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     if (isValid !== null) {
@@ -22,27 +52,18 @@ export default function ValidationBanner({ isValid, message, onDismiss }: Valida
         })
       })
 
-      // Auto-hide after 5 seconds
-      const timer = setTimeout(() => {
-        handleDismiss()
-      }, 5000)
+      // Start the timeout
+      startTimeout()
 
-      return () => clearTimeout(timer)
+      return () => {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current)
+        }
+      }
     } else {
       handleDismiss()
     }
-  }, [isValid, message])
-
-  const handleDismiss = () => {
-    setIsVisible(false)
-    // Wait for fade out animation to complete before removing from DOM
-    setTimeout(() => {
-      setShouldRender(false)
-      if (onDismiss) {
-        onDismiss()
-      }
-    }, 300) // Match the fade-out animation duration
-  }
+  }, [isValid, message, startTimeout, handleDismiss])
 
   if (!shouldRender || isValid === null) {
     return null
@@ -51,13 +72,21 @@ export default function ValidationBanner({ isValid, message, onDismiss }: Valida
   // Split message by '; ' to create bullet points
   const messageItems = message.split('; ').filter(item => item.trim().length > 0)
 
+  // Determine banner type: valid (success), invalid (error), or info (neutral/info messages)
+  // For info messages, we use 'valid' styling but with info icon
+  const bannerType = isValid === false ? 'invalid' : 'valid'
+  
   return (
     <div
-      className={`validation-banner ${isValid ? 'validation-banner--valid' : 'validation-banner--invalid'} ${isVisible ? 'validation-banner--visible' : 'validation-banner--hidden'}`}
+      className={`validation-banner validation-banner--${bannerType} ${isVisible ? 'validation-banner--visible' : 'validation-banner--hidden'}`}
       onClick={handleDismiss}
+      onMouseEnter={pauseTimeout}
+      onMouseLeave={startTimeout}
     >
       <div className="validation-banner-content">
-        <span className="validation-banner-icon">{isValid ? '✓' : '✗'}</span>
+        <span className="validation-banner-icon">
+          {isValid === false ? '✗' : '✓'}
+        </span>
         <div className="validation-banner-message">
           {messageItems.length > 1 ? (
             <ul className="validation-banner-list">

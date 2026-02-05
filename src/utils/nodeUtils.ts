@@ -157,6 +157,25 @@ export const getNodeLabel = (module: Module | undefined, nodeData: any, nodeType
   return module.name
 }
 
-// ID generator for nodes
-let nodeIdCounter = 0
-export const getId = () => `node_${nodeIdCounter++}`
+// ID generator for nodes - generates IDs based on module type
+const nodeIdCounters: Record<string, number> = {}
+
+export const getId = (moduleName?: string, nodeType?: string): string => {
+  // Determine the base name from module name or node type
+  let baseName = 'node'
+  if (moduleName) {
+    // Convert module name to snake_case for ID
+    baseName = moduleName.toLowerCase().replace(/\s+/g, '_')
+  } else if (nodeType) {
+    // Convert node type to snake_case
+    baseName = nodeType.toLowerCase().replace(/\s+/g, '_')
+  }
+  
+  // Get or initialize counter for this base name
+  if (!nodeIdCounters[baseName]) {
+    nodeIdCounters[baseName] = 0
+  }
+  
+  // Increment and return ID
+  return `${baseName}_${++nodeIdCounters[baseName]}`
+}
