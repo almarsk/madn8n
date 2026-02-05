@@ -1,6 +1,15 @@
 import { Handle, Position, type NodeProps, useReactFlow } from 'reactflow'
-import nodeConfigs, { type NodeConfig, type NodeType, isBranchingNodeType, isBranchingOutputNodeType, canOutputNodeBeDeleted, NODE_TYPES } from './nodeConfigs'
+import nodeConfigs, {
+  type NodeConfig,
+  type NodeType,
+  isBranchingNodeType,
+  isBranchingOutputNodeType,
+  canOutputNodeBeDeleted,
+  NODE_TYPES,
+} from './nodeConfigs'
 import { useCallback } from 'react'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import Tooltip from '@mui/material/Tooltip'
 
 interface NodeFactoryData extends NodeConfig {
     label: string
@@ -115,16 +124,23 @@ function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
             <div
                 className={`dynamic-node-label ${isBranchingNodeType(nodeType) ? 'branching-node-header' : ''}`}
             >
-                <span>{data.label}</span>
-                {/* Hide menu icon for output nodes that cannot be deleted */}
-                {!(isBranchingOutputNodeType(nodeType) && !canOutputNodeBeDeleted(nodeType)) && (
-                    <span 
-                        className="dynamic-node-label-menu-icon"
-                        onClick={handleMenuIconClick}
-                    >
-                        ⋮
-                    </span>
-                )}
+                <span className="dynamic-node-label-text">{data.label}</span>
+                <div
+                    className="dynamic-node-label-menu-opener"
+                    onClick={handleMenuIconClick}
+                    title="Open node menu"
+                >
+                    <Tooltip title="Open node menu" arrow placement="top" disableInteractive>
+                        <button
+                            type="button"
+                            className="dynamic-node-label-menu-icon"
+                            onClick={handleMenuIconClick}
+                            aria-label="Open node menu"
+                        >
+                            <MoreVertIcon fontSize="small" />
+                        </button>
+                    </Tooltip>
+                </div>
             </div>
 
             {/* Target handles - render if config allows */}

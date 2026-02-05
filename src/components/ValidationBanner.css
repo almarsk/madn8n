@@ -3,12 +3,12 @@
   bottom: 1rem;
   left: 1rem;
   z-index: 100;
-  padding: 0.75rem 1rem;
-  border-radius: 0.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: 0.75rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(8px);
-  min-width: 200px;
-  max-width: 400px;
+  min-width: 250px;
+  max-width: 500px;
   cursor: pointer;
   transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
   opacity: 0;
@@ -39,18 +39,41 @@
 
 .validation-banner-content {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
+  align-items: flex-start;
+  gap: 0.75rem;
+  font-size: 0.875rem;
   font-weight: 500;
+  line-height: 1.5;
 }
 
 .validation-banner-icon {
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: bold;
   flex-shrink: 0;
+  margin-top: 0.1rem;
 }
 
 .validation-banner-message {
   flex: 1;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  max-width: 100%;
+  hyphens: auto;
+  line-height: 1.6;
+}
+
+.validation-banner-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style-type: disc;
+}
+
+.validation-banner-list li {
+  margin-bottom: 0.25rem;
+  line-height: 1.5;
+}
+
+.validation-banner-list li:last-child {
+  margin-bottom: 0;
 }

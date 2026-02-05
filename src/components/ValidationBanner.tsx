@@ -48,6 +48,9 @@ export default function ValidationBanner({ isValid, message, onDismiss }: Valida
     return null
   }
 
+  // Split message by '; ' to create bullet points
+  const messageItems = message.split('; ').filter(item => item.trim().length > 0)
+
   return (
     <div
       className={`validation-banner ${isValid ? 'validation-banner--valid' : 'validation-banner--invalid'} ${isVisible ? 'validation-banner--visible' : 'validation-banner--hidden'}`}
@@ -55,7 +58,17 @@ export default function ValidationBanner({ isValid, message, onDismiss }: Valida
     >
       <div className="validation-banner-content">
         <span className="validation-banner-icon">{isValid ? '✓' : '✗'}</span>
-        <span className="validation-banner-message">{message}</span>
+        <div className="validation-banner-message">
+          {messageItems.length > 1 ? (
+            <ul className="validation-banner-list">
+              {messageItems.map((item, index) => (
+                <li key={index}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <span>{message}</span>
+          )}
+        </div>
       </div>
     </div>
   )

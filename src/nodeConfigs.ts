@@ -34,7 +34,7 @@ export const nodeConfigs: Record<string, NodeConfig> = {
     hasTargetHandles: true,
     canStartConnection: true,
     isModuleType: true,
-    defaultWidth: 150,
+    defaultWidth: 220,
     defaultHeight: 80,
     zIndex: 2,
   },
@@ -50,10 +50,10 @@ export const nodeConfigs: Record<string, NodeConfig> = {
     padding: 20,
     headerHeight: 50,
     outputSpacing: 10,
-    outputNodeWidth: 130,
+    outputNodeWidth: 220,
     outputNodeHeight: 60,
     defaultOutputCount: 1,
-    zIndex: 1,
+    zIndex: 10, // Base z-index for branching nodes (higher than single nodes)
     outputNodeType: 'branchingOutputInternal', // Specifies which output node type to use
   },
   branchingListParam: {
@@ -68,10 +68,10 @@ export const nodeConfigs: Record<string, NodeConfig> = {
     padding: 20,
     headerHeight: 50,
     outputSpacing: 10,
-    outputNodeWidth: 130,
+    outputNodeWidth: 220,
     outputNodeHeight: 60,
     defaultOutputCount: 1,
-    zIndex: 1,
+    zIndex: 10, // Base z-index for branching nodes (higher than single nodes)
     outputNodeType: 'branchingOutputListParam', // Specifies which output node type to use
   },
   branchingOutputInternal: {
@@ -83,9 +83,9 @@ export const nodeConfigs: Record<string, NodeConfig> = {
     canStartConnection: true,
     isModuleType: false, // Auto-generated, not available as module
     className: 'branching-node-output',
-    defaultWidth: 130,
+    defaultWidth: 220,
     defaultHeight: 60,
-    zIndex: 2,
+    zIndex: 11, // Slightly higher than parent to ensure outputs are above parent
     canBeDeleted: false, // Cannot be deleted
   },
   branchingOutputListParam: {
@@ -97,9 +97,9 @@ export const nodeConfigs: Record<string, NodeConfig> = {
     canStartConnection: true,
     isModuleType: false, // Auto-generated, not available as module
     className: 'branching-node-output',
-    defaultWidth: 130,
+    defaultWidth: 220,
     defaultHeight: 60,
-    zIndex: 2,
+    zIndex: 11, // Slightly higher than parent to ensure outputs are above parent
     canBeDeleted: true, // Can be deleted
   },
 }

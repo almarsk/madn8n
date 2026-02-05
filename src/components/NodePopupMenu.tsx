@@ -4,6 +4,10 @@ import { ReactFlowInstance, type Node } from 'reactflow'
 import './NodePopupMenu.css'
 import modules, { type Module } from '../modules'
 import { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES, nodeConfigs, canOutputNodeBeDeleted } from '../nodeConfigs'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import CloseIcon from '@mui/icons-material/Close'
+import Tooltip from '@mui/material/Tooltip'
 
 
 // Import parseType from utils instead of duplicating
@@ -187,7 +191,7 @@ export default function NodePopupMenu({
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const [menuSize, setMenuSize] = useState({ width: 280, height: 180 })
-  const questionMarkRef = useRef<HTMLSpanElement>(null)
+  const questionMarkRef = useRef<HTMLButtonElement | null>(null)
   const nodeType = node ? ((node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType) : undefined
   const module = node?.data?.moduleName ? modules.find((m: Module) => m.name === node.data.moduleName) : undefined
 
@@ -205,6 +209,25 @@ export default function NodePopupMenu({
       setMetadata(flowMetadata)
     }
   }, [isFlowConfig, flowMetadata])
+
+  // Focus helper: first real input in the menu (skip buttons and checkboxes)
+  const focusFirstField = () => {
+    if (!menuRef.current) return
+    const focusable = menuRef.current.querySelectorAll<HTMLElement>(
+      'input:not([type="checkbox"]):not([type="radio"]), textarea, select'
+    )
+    if (focusable.length > 0) {
+      focusable[0].focus()
+    }
+  }
+
+  // When the menu becomes visible (position is set) or node changes, focus the first field
+  useEffect(() => {
+    if (!position) return
+    // Defer to next frame so DOM/content are fully rendered
+    const id = requestAnimationFrame(focusFirstField)
+    return () => cancelAnimationFrame(id)
+  }, [position, node?.id, isFlowConfig])
 
   useEffect(() => {
     // Update params when node data changes (only for node config)
@@ -246,7 +269,7 @@ export default function NodePopupMenu({
         // Position next to node for node config
         const nodePosition = node.position
         const style = node.style || {}
-        const nodeWidth = typeof style.width === 'number' ? style.width : 150
+        const nodeWidth = typeof style.width === 'number' ? style.width : 180
 
         // Convert flow position to screen position
         const screenPos = reactFlowInstance.flowToScreenPosition({
@@ -265,24 +288,22 @@ export default function NodePopupMenu({
         return
       }
 
-      // Constrain menu to viewport bounds
-      if (menuRef.current) {
-        const menuRect = menuRef.current.getBoundingClientRect()
-        const menuWidth = menuRect.width || 280
-        const menuHeight = menuRect.height || 200
+      // Constrain menu to viewport bounds BEFORE setting position
+      // Use known menu dimensions to calculate constrained position immediately
+      const menuWidth = menuSize.width || 280
+      const menuHeight = menuSize.height || 200
 
-        const viewportWidth = window.innerWidth
-        const viewportHeight = window.innerHeight
-        const margin = 10
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const margin = 10
 
-        const minX = margin
-        const minY = margin
-        const maxX = viewportWidth - menuWidth - margin
-        const maxY = viewportHeight - menuHeight - margin
+      const minX = margin
+      const minY = margin
+      const maxX = viewportWidth - menuWidth - margin
+      const maxY = viewportHeight - menuHeight - margin
 
-        newPosition.x = Math.max(minX, Math.min(maxX, newPosition.x))
-        newPosition.y = Math.max(minY, Math.min(maxY, newPosition.y))
-      }
+      newPosition.x = Math.max(minX, Math.min(maxX, newPosition.x))
+      newPosition.y = Math.max(minY, Math.min(maxY, newPosition.y))
 
       setPosition(newPosition)
       if (onPositionChange) {
@@ -290,8 +311,10 @@ export default function NodePopupMenu({
       }
     }
 
-    // Calculate position immediately
-    updatePosition()
+    // Calculate position immediately - use requestAnimationFrame to ensure DOM is ready
+    requestAnimationFrame(() => {
+      updatePosition()
+    })
 
     // Update position when viewport changes or node moves (only for node config)
     if (!isFlowConfig && node) {
@@ -318,30 +341,46 @@ export default function NodePopupMenu({
     const updateTooltipPosition = () => {
       if (!questionMarkRef.current) return
 
-      const rect = questionMarkRef.current.getBoundingClientRect()
-      const tooltipWidth = 300
-      const tooltipHeight = 100
-      const margin = 10
+      const tooltipElement = document.querySelector('[data-tooltip-doc]') as HTMLElement
+      if (!tooltipElement) return
 
-      let finalX = rect.left + (rect.width / 2) - (tooltipWidth / 2)
-      let finalY = rect.top - tooltipHeight - margin
+      const iconRect = questionMarkRef.current.getBoundingClientRect()
+      const tooltipRect = tooltipElement.getBoundingClientRect()
+      const tooltipWidth = tooltipRect.width || 300
+      const margin = 8
 
+      // Center tooltip horizontally relative to icon
+      let finalX = iconRect.left + (iconRect.width / 2) - (tooltipWidth / 2)
+
+      // Position tooltip so its bottom edge is just above the icon with a bit more space
+      let finalY = iconRect.top - tooltipRect.height - margin
+
+      // Adjust if tooltip would go off left edge
       if (finalX < margin) {
         finalX = margin
       }
+      // Adjust if tooltip would go off right edge
       if (finalX + tooltipWidth > window.innerWidth - margin) {
         finalX = window.innerWidth - tooltipWidth - margin
       }
+      // If tooltip would go off top, show below icon instead
       if (finalY < margin) {
-        finalY = rect.bottom + margin
+        finalY = iconRect.bottom + margin
       }
 
       setTooltipPosition({ x: finalX, y: finalY })
     }
 
-    updateTooltipPosition()
-    const interval = setInterval(updateTooltipPosition, 100)
-    return () => clearInterval(interval)
+    // Use requestAnimationFrame to ensure tooltip is rendered before calculating position
+    let interval: number | null = null
+    requestAnimationFrame(() => {
+      updateTooltipPosition()
+      interval = setInterval(updateTooltipPosition, 100)
+    })
+
+    return () => {
+      if (interval !== null) clearInterval(interval)
+    }
   }, [showTooltip, position])
 
   // Reset user positioning when node changes (but preserve if initialPosition provided)
@@ -509,10 +548,21 @@ export default function NodePopupMenu({
       }
     }
 
-    // Close on escape key
+    // Close on escape key or backspace key (when menu is focused)
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose()
+      } else if (event.key === 'Backspace') {
+        // Only close on backspace if the menu or one of its inputs is focused
+        const activeElement = document.activeElement
+        if (menuRef.current && activeElement && menuRef.current.contains(activeElement)) {
+          // Don't close if user is typing in an input/textarea (unless it's empty)
+          const isInput = activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA'
+          if (!isInput || (isInput && (activeElement as HTMLInputElement | HTMLTextAreaElement).value === '')) {
+            event.preventDefault()
+            onClose()
+          }
+        }
       }
     }
 
@@ -572,7 +622,10 @@ export default function NodePopupMenu({
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaY = moveEvent.clientY - startY
-      let nextHeight = Math.max(200, height + deltaY)
+      // Calculate minimum height based on header + minimum content
+      // Header is ~40px, minimum content should be ~60px
+      const minHeight = 100
+      let nextHeight = Math.max(minHeight, height + deltaY)
 
       // Constrain height to viewport
       const viewportHeight = window.innerHeight
@@ -638,85 +691,85 @@ export default function NodePopupMenu({
           })()}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {module?.documentation && (
+          {module?.documentation && !isFlowConfig && nodeType && !isBranchingOutputNodeType(nodeType) && (
             <div style={{ position: 'relative', display: 'inline-block' }}>
-              <span
+              <button
                 ref={questionMarkRef}
-                style={{
-                  cursor: 'help',
-                  fontSize: '0.875rem',
-                  color: 'rgba(148, 163, 184, 0.8)',
-                  lineHeight: 1,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '1.25rem',
-                  height: '1.25rem',
-                  borderRadius: '50%',
-                  border: '1px solid rgba(148, 163, 184, 0.5)',
-                  backgroundColor: 'rgba(148, 163, 184, 0.1)',
-                }}
+                type="button"
+                className="node-popup-menu-icon-button"
+                style={{ cursor: 'help' }}
                 onMouseEnter={() => {
                   if (!questionMarkRef.current || !reactFlowWrapper.current) return
 
-                  // Use same strategy as menu positioning - get bounding rect
-                  const rect = questionMarkRef.current.getBoundingClientRect()
-
-                  // Position tooltip above the question mark, centered
-                  const tooltipWidth = 300
-                  const tooltipHeight = 100 // approximate
-                  const margin = 10
-
-                  let finalX = rect.left + (rect.width / 2) - (tooltipWidth / 2)
-                  let finalY = rect.top - tooltipHeight - margin
-
-                  // Adjust if tooltip would go off left edge
-                  if (finalX < margin) {
-                    finalX = margin
-                  }
-                  // Adjust if tooltip would go off right edge
-                  if (finalX + tooltipWidth > window.innerWidth - margin) {
-                    finalX = window.innerWidth - tooltipWidth - margin
-                  }
-                  // Adjust if tooltip would go off top edge
-                  if (finalY < margin) {
-                    finalY = rect.bottom + margin
-                  }
-
-                  setTooltipPosition({ x: finalX, y: finalY })
+                  // Calculate position after tooltip is shown, using requestAnimationFrame to avoid jump
                   setShowTooltip(true)
+
+                  // Use requestAnimationFrame to wait for tooltip to render, then position correctly
+                  requestAnimationFrame(() => {
+                    const tooltipElement = document.querySelector('[data-tooltip-doc]') as HTMLElement
+                    if (!tooltipElement || !questionMarkRef.current) return
+
+                    const iconRect = questionMarkRef.current.getBoundingClientRect()
+                    const tooltipRect = tooltipElement.getBoundingClientRect()
+                    const tooltipWidth = tooltipRect.width || 300
+                    const margin = 8 // Small gap between icon and tooltip
+
+                    // Center tooltip horizontally relative to icon
+                    let finalX = iconRect.left + (iconRect.width / 2) - (tooltipWidth / 2)
+
+                    // Position tooltip so its bottom edge is just above the icon with a bit more space
+                    let finalY = iconRect.top - tooltipRect.height - margin
+
+                    // Adjust if tooltip would go off left edge
+                    if (finalX < margin) {
+                      finalX = margin
+                    }
+                    // Adjust if tooltip would go off right edge
+                    if (finalX + tooltipWidth > window.innerWidth - margin) {
+                      finalX = window.innerWidth - tooltipWidth - margin
+                    }
+                    // If tooltip would go off top, show below icon instead
+                    if (finalY < margin) {
+                      finalY = iconRect.bottom + margin
+                    }
+
+                    setTooltipPosition({ x: finalX, y: finalY })
+                  })
                 }}
                 onMouseLeave={() => {
                   setShowTooltip(false)
                 }}
+                onMouseDown={(e) => e.stopPropagation()}
               >
-                ?
-              </span>
-              {showTooltip && createPortal(
-                <div
-                  style={{
-                    position: 'fixed',
-                    left: `${tooltipPosition.x}px`,
-                    top: `${tooltipPosition.y}px`,
-                    padding: '0.5rem 0.75rem',
-                    backgroundColor: 'rgba(15, 23, 42, 0.98)',
-                    color: '#e5e7eb',
-                    border: '1px solid rgba(148, 163, 184, 0.4)',
-                    borderRadius: '0.5rem',
-                    fontSize: '0.875rem',
-                    maxWidth: '300px',
-                    width: 'max-content',
-                    zIndex: 10001,
-                    pointerEvents: 'none',
-                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-                    whiteSpace: 'pre-wrap',
-                    wordWrap: 'break-word',
-                  }}
-                >
-                  {module?.documentation}
-                </div>,
-                document.body
-              )}
+                <InfoOutlinedIcon fontSize="small" />
+              </button>
+              {showTooltip &&
+                createPortal(
+                  <div
+                    data-tooltip-doc
+                    style={{
+                      position: 'fixed',
+                      left: `${tooltipPosition.x}px`,
+                      top: `${tooltipPosition.y}px`,
+                      padding: '0.5rem 0.75rem',
+                      backgroundColor: 'rgba(15, 23, 42, 0.98)',
+                      color: '#e5e7eb',
+                      border: '1px solid rgba(148, 163, 184, 0.4)',
+                      borderRadius: '0.5rem',
+                      fontSize: '0.875rem',
+                      maxWidth: '300px',
+                      width: 'max-content',
+                      zIndex: 10001,
+                      pointerEvents: 'none',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                      whiteSpace: 'pre-wrap',
+                      wordWrap: 'break-word',
+                    }}
+                  >
+                    {module?.documentation}
+                  </div>,
+                  document.body
+                )}
             </div>
           )}
           {!isFlowConfig && onDeleteNode && node && (() => {
@@ -730,53 +783,33 @@ export default function NodePopupMenu({
             }
 
             return (
-              <button
-                type="button"
-                className="node-popup-menu-delete"
-                onClick={() => {
-                  if (onDeleteNode && node) {
-                    onDeleteNode(node.id)
-                  }
-                  onClose()
-                }}
-                title="Delete node"
-                onMouseDown={(e) => e.stopPropagation()}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'rgba(239, 68, 68, 0.8)',
-                  cursor: 'pointer',
-                  fontSize: '1.2rem',
-                  lineHeight: 1,
-                  padding: '0.25rem 0.5rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: '0.375rem',
-                  transition: 'background 0.2s ease',
-                  minWidth: '24px',
-                  height: '24px',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent'
-                }}
-              >
-                🗑️
-              </button>
+              <Tooltip title="Delete node" arrow placement="top" disableInteractive>
+                <button
+                  type="button"
+                  className="node-popup-menu-icon-button node-popup-menu-delete"
+                  onClick={() => {
+                    if (onDeleteNode && node) {
+                      onDeleteNode(node.id)
+                    }
+                    onClose()
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <DeleteOutlineIcon fontSize="small" />
+                </button>
+              </Tooltip>
             )
           })()}
-          <button
-            type="button"
-            className="node-popup-menu-close"
-            onClick={onClose}
-            title="Close"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            ×
-          </button>
+          <Tooltip title="Close" arrow placement="top" disableInteractive>
+            <button
+              type="button"
+              className="node-popup-menu-icon-button node-popup-menu-close"
+              onClick={onClose}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <CloseIcon fontSize="small" />
+            </button>
+          </Tooltip>
         </div>
       </div>
       <div className="node-popup-menu-content" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>

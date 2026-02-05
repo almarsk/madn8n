@@ -140,10 +140,10 @@
 }
 
 .nodes-toolbar-body {
-  padding: 0.3rem 0.4rem 0.4rem;
+  padding: 0.3rem 0.4rem 0.35rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
   flex: 1;
   overflow: hidden;
   /* No scrollbar on toolbar body */
@@ -176,10 +176,20 @@
 
 .toolbar-nav {
   display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+}
+
+.toolbar-nav-row {
+  display: flex;
   align-items: center;
   gap: 0.25rem;
   flex-wrap: wrap;
-  width: 100%;
+}
+
+.toolbar-nav-row--secondary {
+  margin-top: 0.15rem;
 }
 
 .toolbar-nav-button {
@@ -384,7 +394,7 @@
   border: 1px solid rgba(148, 163, 184, 0.4);
   border-radius: 8px;
   padding: 12px 16px;
-  min-width: 120px;
+  min-width: 220px;
   min-height: 60px;
   width: 100%;
   height: 100%;
@@ -426,7 +436,38 @@
 .branching-node-output {
   border-color: rgba(96, 165, 250, 0.4);
   background: rgba(30, 41, 59, 0.95);
-  transition: none !important; /* Prevent wiggling - output nodes should stick to parent */
+}
+
+/* Smooth animation for output nodes when repositioning (not during drag) */
+/* ReactFlow wraps nodes in .react-flow__node and applies className to the wrapper */
+/* Smooth animation for output nodes when repositioning (not during drag) */
+/* ReactFlow wraps nodes in .react-flow__node and applies className to the wrapper */
+.react-flow__node.branching-output-node-wrapper {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Disable transition during drag - ReactFlow adds 'dragging' class */
+.react-flow__node.branching-output-node-wrapper.dragging {
+  transition: none !important;
+}
+
+/* Also disable transition while a branching node is being dragged,
+   so outputs move in lockstep with their parent without lag */
+.canvas-wrapper.branching-drag-active .react-flow__node.branching-output-node-wrapper {
+  transition: none !important;
+}
+
+/* Ensure output node labels are left-aligned consistently for both branching modes */
+.branching-node-output .dynamic-node-label {
+  justify-content: space-between;
+  padding: 0;
+  gap: 0;
+}
+
+.branching-node-output .dynamic-node-label-text {
+  text-align: left;
+  padding: 0 10px;
+  flex: 1;
 }
 
 .dynamic-node:active {
@@ -440,10 +481,13 @@
   font-weight: 500;
   text-align: center;
   cursor: default;
-  user-select: text;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   pointer-events: all;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   gap: 6px;
   width: 100%;
@@ -451,45 +495,101 @@
   overflow: visible;
 }
 
-.dynamic-node-label>span:first-child {
+/* Prevent text selection on nodes - only allow in actual input/textarea fields */
+.react-flow__node {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  contain: layout style;
+}
+
+.dynamic-node-label-text {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  display: inline-block;
+}
+
+/* Highlight selected nodes subtly - sleek and less obvious */
+.react-flow__node.selected {
+  outline: 1px solid rgba(96, 165, 250, 0.5) !important;
+  outline-offset: 1px;
+  border-radius: 8px !important;
+  box-shadow: 
+    0 0 0 1px rgba(96, 165, 250, 0.15),
+    0 2px 6px rgba(30, 64, 175, 0.2) !important;
+}
+
+/* Highlight menu windows subtly when open */
+.node-popup-menu {
+  outline: 1px solid rgba(96, 165, 250, 0.4);
+  outline-offset: 1px;
+  box-shadow:
+    0 18px 45px rgba(15, 23, 42, 0.9),
+    0 0 0 1px rgba(15, 23, 42, 0.9),
+    0 0 0 2px rgba(96, 165, 250, 0.1) !important;
+}
+
+.dynamic-node-label-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: calc(100% - 20px);
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.dynamic-node-label-menu-opener {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 120ms ease;
+  background: transparent;
+  border-radius: 4px;
+  padding: 6px;
+  width: 36px;
+  height: 36px;
+  margin-left: 0;
+}
+
+.dynamic-node-label-menu-opener:hover {
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.dynamic-node-label-menu-opener:active {
+  background: rgba(148, 163, 184, 0.25);
 }
 
 .dynamic-node-label-menu-icon {
   font-size: 16px;
   line-height: 1;
   color: rgba(148, 163, 184, 0.6);
-  opacity: 0.7;
+  opacity: 0.8;
   transition: all 120ms ease;
   user-select: none;
-  pointer-events: all;
-  cursor: pointer;
-  padding: 4px;
-  margin: -4px;
-  display: inline-flex;
+  pointer-events: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  outline: none;
   background: transparent;
-  position: relative;
-  z-index: 1;
+  width: 100%;
+  height: 100%;
 }
 
-.dynamic-node-label-menu-icon:hover {
+.dynamic-node-label-menu-opener:hover .dynamic-node-label-menu-icon {
   opacity: 1;
   color: rgba(148, 163, 184, 0.9);
-  background: rgba(148, 163, 184, 0.2);
-}
-
-.dynamic-node-label-menu-icon:active {
-  background: rgba(148, 163, 184, 0.3);
 }
 
 .react-flow__resize-control {
@@ -516,7 +616,7 @@
   border-radius: 50%;
   transition: all 0.2s ease;
   pointer-events: all;
-  cursor: crosshair;
+  cursor: default;
   /* Larger interaction area for easier connections */
   position: relative;
 }
@@ -533,7 +633,26 @@
   border-radius: 50%;
   background: transparent;
   pointer-events: all;
-  cursor: crosshair;
+  cursor: inherit;
+}
+
+/* Fix handle cursors - only source handles that can start connections show crosshair */
+/* Target handles should never show crosshair (you can't drag FROM them) */
+.react-flow__handle.react-flow__handle-target,
+.react-flow__handle.react-flow__handle-target::before {
+  cursor: default !important;
+}
+
+/* Only visible source handles that can start connections show crosshair */
+.react-flow__handle.react-flow__handle-source:not(.invisible-handle),
+.react-flow__handle.react-flow__handle-source:not(.invisible-handle)::before {
+  cursor: crosshair !important;
+}
+
+/* Invisible source handles - default to default cursor since they're hidden when not connectable */
+.react-flow__handle.invisible-handle.react-flow__handle-source,
+.react-flow__handle.invisible-handle.react-flow__handle-source::before {
+  cursor: default !important;
 }
 
 .react-flow__handle:hover {

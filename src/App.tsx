@@ -42,10 +42,17 @@ function App() {
     message: '',
   })
 
+  // Track when a branching node is being dragged so we can disable
+  // smooth transitions for its output nodes (prevents them from lagging)
+  const [isBranchingDragging, setIsBranchingDragging] = useState(false)
+
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
   const history = useHistory()
+
+  // Track highest z-index to ensure newly created nodes appear on top
+  const highestZIndexRef = useRef(100)
 
   // Use refs to always get current state for history (avoid stale closures)
   const nodesRef = useRef(nodes)
@@ -72,6 +79,13 @@ function App() {
     setEdges,
     setNodes,
   })
+
+  // Ensure minimap is turned off when there are no nodes so the button state stays consistent
+  useEffect(() => {
+    if (nodes.length === 0 && showMinimap) {
+      setShowMinimap(false)
+    }
+  }, [nodes.length, showMinimap])
 
   // Helper to save history before state changes - uses refs to get current state
   const saveHistoryBeforeChange = useCallback((changeType: 'param' | 'other' = 'other') => {
@@ -170,15 +184,37 @@ function App() {
           outputCount = module.outputConfig.outputCount
         }
         const nodesToAdd = createBranchingNodeWithOutputs(position, outputCount, module.name, module.type as NodeType)
-        // Add all nodes at once (parent + outputs) - this is one operation
-        setNodes((nds) => nds.concat(nodesToAdd))
+        // Set z-index for newly created nodes to appear on top
+        // Find the highest z-index among all existing nodes
+        setNodes((nds) => {
+          const maxZIndex = nds.reduce((max, n) => {
+            const z = typeof n.zIndex === 'number' ? n.zIndex : 0
+            return Math.max(max, z)
+          }, highestZIndexRef.current)
+          const baseZIndex = maxZIndex + 1
+          highestZIndexRef.current = baseZIndex + outputCount
+          const nodesWithZIndex = nodesToAdd.map((node, idx) => ({
+            ...node,
+            zIndex: baseZIndex + idx,
+          }))
+          return nds.concat(nodesWithZIndex)
+        })
       } else {
         // Single node (or any other non-branching type)
         const newNode = createNodeFromConfig(module.type as NodeType, position, {
           moduleName: module.name,
           connectingFrom: null,
         })
-        setNodes((nds) => nds.concat(newNode))
+        // Set z-index for newly created node to appear on top
+        setNodes((nds) => {
+          const maxZIndex = nds.reduce((max, n) => {
+            const z = typeof n.zIndex === 'number' ? n.zIndex : 0
+            return Math.max(max, z)
+          }, highestZIndexRef.current)
+          const newZIndex = maxZIndex + 1
+          highestZIndexRef.current = newZIndex
+          return nds.concat({ ...newNode, zIndex: newZIndex })
+        })
       }
 
       // Close menu when adding a new node
@@ -214,7 +250,7 @@ function App() {
 
       // Check if there's already a node at this position and offset if needed
       const singleConfig = nodeConfigs.single
-      const nodeWidth = singleConfig?.defaultWidth || 150
+      const nodeWidth = singleConfig?.defaultWidth || 180
       const nodeHeight = singleConfig?.defaultHeight || 80
       const offsetX = 30
       const offsetY = 30
@@ -290,22 +326,41 @@ function App() {
 
         // Create node(s) based on config type
         if (isBranchingNodeType(module.type)) {
-          const branchingConfig = nodeConfigs.branching
+          const branchingConfig = nodeConfigs.branchingInternal || nodeConfigs.branchingListParam
           // For internal type, use the fixed output count from module config
           // For listParam type, use default from nodeConfig
           let outputCount = branchingConfig?.defaultOutputCount ?? 1
           if (module.outputConfig?.type === 'internal') {
             outputCount = module.outputConfig.outputCount
           }
-          const nodes = createBranchingNodeWithOutputs(finalPosition, outputCount, module.name, module.type as NodeType)
-          return nds.concat(nodes)
+          const nodesToAdd = createBranchingNodeWithOutputs(finalPosition, outputCount, module.name, module.type as NodeType)
+          // Set z-index for newly created nodes to appear on top
+          // Find the highest z-index among all existing nodes
+          const maxZIndex = nds.reduce((max, n) => {
+            const z = typeof n.zIndex === 'number' ? n.zIndex : 0
+            return Math.max(max, z)
+          }, highestZIndexRef.current)
+          const baseZIndex = maxZIndex + 1
+          highestZIndexRef.current = baseZIndex + outputCount
+          const nodesWithZIndex = nodesToAdd.map((node, idx) => ({
+            ...node,
+            zIndex: baseZIndex + idx,
+          }))
+          return nds.concat(nodesWithZIndex)
         } else {
           // Single node (or any other non-branching type)
           const newNode = createNodeFromConfig(module.type as NodeType, finalPosition, {
             moduleName: module.name,
             connectingFrom: null,
           })
-          return nds.concat(newNode)
+          // Set z-index for newly created node to appear on top
+          const maxZIndex = nds.reduce((max, n) => {
+            const z = typeof n.zIndex === 'number' ? n.zIndex : 0
+            return Math.max(max, z)
+          }, highestZIndexRef.current)
+          const newZIndex = maxZIndex + 1
+          highestZIndexRef.current = newZIndex
+          return nds.concat({ ...newNode, zIndex: newZIndex })
         }
 
         // Return unchanged if no module found
@@ -336,6 +391,198 @@ function App() {
       setViewport(viewport)
     },
     []
+  )
+
+  // Handle output node dragging - prevent horizontal movement, constrain vertical movement within bounds
+  // and temporarily move other output nodes out of the way while dragging
+  const onNodeDrag = useCallback(
+    (_event: React.MouseEvent | React.TouchEvent, node: Node) => {
+      const nodeType = node.data?.nodeType as NodeType | undefined
+      // Only handle list param output nodes (draggable ones)
+      if (!nodeType || !isBranchingOutputNodeType(nodeType) || !canOutputNodeBeDeleted(nodeType) || !node.data?.parentNodeId) {
+        return
+      }
+
+      const parentId = node.data.parentNodeId
+      setNodes((nds) => {
+        const branchingNode = nds.find((n) => n.id === parentId)
+        if (!branchingNode) return nds
+
+        const module = branchingNode.data?.moduleName ? modules.find((m) => m.name === branchingNode.data.moduleName) : undefined
+        if (!module?.outputConfig || module.outputConfig.type !== 'listParam') return nds
+
+        // Get all output nodes to calculate bounds
+        const allOutputNodes = nds.filter((n) => {
+          const nType = n.data?.nodeType as NodeType | undefined
+          return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === parentId
+        })
+
+        // Lock X position to prevent horizontal dragging
+        // Constrain Y movement to stay within branching node bounds
+        const layoutConstants = getBranchingLayoutConstants()
+        const { headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing } = layoutConstants
+        const branchingPos = branchingNode.position || { x: 0, y: 0 }
+        const correctX = calculateOutputNodePosition(branchingPos, node.data?.outputIndex ?? 0, layoutConstants).x
+
+        // Calculate valid Y bounds
+        const baseY = branchingPos.y + headerHeight + outputSpacing + firstOutputExtraSpacing
+        const step = outputNodeHeight + outputSpacing
+        const minY = baseY
+        const maxY = baseY + (allOutputNodes.length - 1) * step
+        const constrainedY = Math.max(minY, Math.min(maxY, node.position.y))
+
+        // Work out the "would be" index for the dragged node based on its vertical position
+        const rawIndex = (constrainedY - baseY) / step
+        const targetIndex = Math.max(0, Math.min(allOutputNodes.length - 1, Math.round(rawIndex)))
+
+        // Build a temporary ordering with the dragged node inserted at the targetIndex
+        const sortedByIndex = [...allOutputNodes].sort((a, b) => {
+          const idxA = typeof a.data?.outputIndex === 'number' ? a.data.outputIndex : 0
+          const idxB = typeof b.data?.outputIndex === 'number' ? b.data.outputIndex : 0
+          return idxA - idxB
+        })
+
+        const withoutDragged = sortedByIndex.filter((n) => n.id !== node.id)
+        const provisionalOrder = [
+          ...withoutDragged.slice(0, targetIndex),
+          node,
+          ...withoutDragged.slice(targetIndex),
+        ]
+
+        // Update positions:
+        // - dragged node follows cursor vertically (constrainedY) and is locked in X
+        // - other outputs snap to their provisional slots so they visually move out of the way
+        return nds.map((n) => {
+          const nType = n.data?.nodeType as NodeType | undefined
+          const isOutputForParent = nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === parentId
+
+          if (!isOutputForParent) {
+            return n
+          }
+
+          if (n.id === node.id) {
+            return {
+              ...n,
+              position: { x: correctX, y: constrainedY },
+            }
+          }
+
+          const newIndex = provisionalOrder.findIndex((item) => item.id === n.id)
+          if (newIndex === -1) {
+            return n
+          }
+
+          const snappedPos = calculateOutputNodePosition(branchingPos, newIndex, layoutConstants)
+          return {
+            ...n,
+            position: snappedPos,
+          }
+        })
+      })
+    },
+    [setNodes, modules]
+  )
+
+  // Handle output node drag stop - immediately snap and reorder
+  const onNodeDragStop = useCallback(
+    (_event: React.MouseEvent | React.TouchEvent, node: Node) => {
+      const nodeType = node.data?.nodeType as NodeType | undefined
+      // Only handle list param output nodes (draggable ones)
+      if (!nodeType || !isBranchingOutputNodeType(nodeType) || !canOutputNodeBeDeleted(nodeType) || !node.data?.parentNodeId) {
+        return
+      }
+
+      const parentId = node.data.parentNodeId
+      setNodes((nds) => {
+        const branchingNode = nds.find((n) => n.id === parentId)
+        if (!branchingNode) return nds
+
+        const module = branchingNode.data?.moduleName ? modules.find((m) => m.name === branchingNode.data.moduleName) : undefined
+        if (!module?.outputConfig || module.outputConfig.type !== 'listParam') return nds
+
+        // Get all output nodes for this parent
+        const allOutputNodes = nds.filter((n) => {
+          const nType = n.data?.nodeType as NodeType | undefined
+          return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === parentId
+        })
+
+        // Calculate new indices based on Y position - snap to valid positions
+        const layoutConstants = getBranchingLayoutConstants()
+        const { headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing } = layoutConstants
+        const branchingPos = branchingNode.position || { x: 0, y: 0 }
+
+        // Create array of all output nodes with their current Y positions
+        // Snap Y positions to valid column positions
+        const baseY = branchingPos.y + headerHeight + outputSpacing + firstOutputExtraSpacing
+        const step = outputNodeHeight + outputSpacing
+        const nodesWithTargetY = allOutputNodes.map((node) => {
+          const currentY = node.position.y
+          // Snap to column positions, but be a bit more eager to switch slots
+          // The +0.2 bias makes neighbours move earlier as you cross the midpoint
+          const slotIndex = Math.round((currentY - baseY) / step + 0.2)
+          const snappedY = baseY + slotIndex * step
+          // Clamp to valid range
+          const minY = baseY
+          const maxY = baseY + (allOutputNodes.length - 1) * step
+          const targetY = Math.max(minY, Math.min(maxY, snappedY))
+          return { node, targetY, currentIndex: node.data?.outputIndex ?? 0 }
+        })
+
+        // Sort by target Y position to determine final order
+        nodesWithTargetY.sort((a, b) => a.targetY - b.targetY)
+
+        // Update output indices and list param array
+        const listParamName = module.outputConfig.listParamName
+        const currentArray = Array.isArray(branchingNode.data?.params?.[listParamName])
+          ? [...branchingNode.data.params[listParamName]]
+          : []
+
+        // Create new array in the new order
+        const newArray = nodesWithTargetY.map((item) => {
+          const oldIndex = item.currentIndex
+          return oldIndex >= 0 && oldIndex < currentArray.length ? currentArray[oldIndex] : ''
+        })
+
+        // Update nodes with final positions and indices
+        let updatedNodes = [...nds]
+        nodesWithTargetY.forEach((item, newIndex) => {
+          const nodeIndex = updatedNodes.findIndex((n) => n.id === item.node.id)
+          if (nodeIndex >= 0) {
+            const correctPosition = calculateOutputNodePosition(branchingPos, newIndex, layoutConstants)
+            updatedNodes[nodeIndex] = {
+              ...updatedNodes[nodeIndex],
+              position: correctPosition,
+              data: {
+                ...updatedNodes[nodeIndex].data,
+                outputIndex: newIndex,
+                params: {
+                  ...updatedNodes[nodeIndex].data.params,
+                  value: newArray[newIndex] ?? '',
+                },
+              },
+            }
+          }
+        })
+
+        // Update branching node with reordered array
+        const branchingIndex = updatedNodes.findIndex((n) => n.id === parentId)
+        if (branchingIndex >= 0) {
+          updatedNodes[branchingIndex] = {
+            ...updatedNodes[branchingIndex],
+            data: {
+              ...updatedNodes[branchingIndex].data,
+              params: {
+                ...updatedNodes[branchingIndex].data.params,
+                [listParamName]: newArray,
+              },
+            },
+          }
+        }
+
+        return updatedNodes
+      })
+    },
+    [setNodes, modules]
   )
 
   const onInit = useCallback(
@@ -422,7 +669,9 @@ function App() {
       const removedBranchingNodeIds = new Set<string>()
       const movedBranchingNodeIds = new Set<string>()
       const selectedOutputNodeIds = new Set<string>()
+      const movedOutputNodeIds = new Map<string, { parentId: string; newPosition: { x: number; y: number } }>()
 
+      // First pass: collect all branching nodes being deleted
       filteredChanges.forEach((change) => {
         if (change.type === 'remove') {
           const node = nodes.find((n) => n.id === change.id)
@@ -430,11 +679,41 @@ function App() {
           if (nodeType && isBranchingNodeType(nodeType)) {
             removedBranchingNodeIds.add(change.id)
           }
-        } else if (change.type === 'position' && change.position) {
+        }
+      })
+
+      // If branching nodes are being deleted, add their output nodes to the deletion batch
+      // This ensures branching node + outputs are deleted together in one operation
+      if (removedBranchingNodeIds.size > 0) {
+        removedBranchingNodeIds.forEach((branchingNodeId) => {
+          const outputNodes = nodes.filter((n) => {
+            const nType = n.data?.nodeType as NodeType | undefined
+            return nType && isBranchingOutputNodeType(nType) && n.data.parentNodeId === branchingNodeId
+          })
+          outputNodes.forEach((outputNode) => {
+            // Add output node deletion to the changes if not already there
+            if (!filteredChanges.some((c) => c.type === 'remove' && c.id === outputNode.id)) {
+              filteredChanges.push({
+                id: outputNode.id,
+                type: 'remove',
+              })
+            }
+          })
+        })
+      }
+
+      filteredChanges.forEach((change) => {
+        if (change.type === 'position' && change.position) {
           const node = nodes.find((n) => n.id === change.id)
           const nodeType = node?.data?.nodeType as NodeType | undefined
           if (nodeType && isBranchingNodeType(nodeType)) {
             movedBranchingNodeIds.add(change.id)
+          } else if (nodeType && isBranchingOutputNodeType(nodeType) && canOutputNodeBeDeleted(nodeType) && node?.data?.parentNodeId) {
+            // Track list param output nodes that are being moved (draggable ones)
+            movedOutputNodeIds.set(change.id, {
+              parentId: node.data.parentNodeId,
+              newPosition: change.position,
+            })
           }
         } else if (change.type === 'select' && change.selected) {
           // Track when output nodes are selected
@@ -448,6 +727,17 @@ function App() {
           // Menus should only open via the menu icon (three dots) click
         }
       })
+
+      // Determine if any branching node is currently being dragged (for this batch)
+      const hasBranchingDragging = filteredChanges.some((change) => {
+        if (change.type !== 'position' || !change.position || !change.dragging) return false
+        const node = nodes.find((n) => n.id === change.id)
+        const nodeType = node?.data?.nodeType as NodeType | undefined
+        return !!nodeType && isBranchingNodeType(nodeType)
+      })
+      if (hasBranchingDragging !== isBranchingDragging) {
+        setIsBranchingDragging(hasBranchingDragging)
+      }
 
       // If an output node is being selected, deselect its parent branching node
       if (selectedOutputNodeIds.size > 0) {
@@ -488,14 +778,6 @@ function App() {
             removedOutputNodeIds.add(change.id)
             const parentId = node.data.parentNodeId
             parentNodeIdsToUpdate.add(parentId)
-
-            // Remove parent from deletion if it's also being deleted
-            const parentRemoveIndex = filteredChanges.findIndex(
-              (c) => c.type === 'remove' && c.id === parentId
-            )
-            if (parentRemoveIndex !== -1) {
-              filteredChanges.splice(parentRemoveIndex, 1)
-            }
           }
         }
       })
@@ -562,10 +844,10 @@ function App() {
 
             // Recalculate branching node size
             const layoutConstants = getBranchingLayoutConstants()
-            const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight } = layoutConstants
+            const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing } = layoutConstants
             const newOutputCount = remainingOutputNodes.length
             const branchingNodeWidth = outputNodeWidth + padding * 2
-            const branchingNodeHeight = headerHeight + outputSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
+            const branchingNodeHeight = headerHeight + outputSpacing + firstOutputExtraSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
 
             // Update branching node
             const branchingIndex = updatedNodes.findIndex((n) => n.id === parentId)
@@ -600,19 +882,29 @@ function App() {
       }
 
       // If branching nodes are being removed, also remove their output nodes
+      // Note: Output nodes should already be in filteredChanges from the earlier logic,
+      // but we handle it here as a fallback and to remove edges
       if (removedBranchingNodeIds.size > 0) {
-        setNodes((nds) => {
-          const outputNodesToRemove = nds.filter((n) => {
-            const nodeType = n.data?.nodeType as NodeType | undefined
-            return nodeType && isBranchingOutputNodeType(nodeType) && n.data.parentNodeId && removedBranchingNodeIds.has(n.data.parentNodeId)
-          })
-          const outputNodeIdsToRemove = new Set(outputNodesToRemove.map((n) => n.id))
-
-          // Also remove edges connected to these output nodes
-          setEdges((eds) => eds.filter((e) => !outputNodeIdsToRemove.has(e.source) && !outputNodeIdsToRemove.has(e.target)))
-
-          return nds.filter((n) => !outputNodeIdsToRemove.has(n.id))
+        // Collect all output node IDs that should be removed
+        const outputNodeIdsToRemove = new Set<string>()
+        nodes.forEach((n) => {
+          const nodeType = n.data?.nodeType as NodeType | undefined
+          if (nodeType && isBranchingOutputNodeType(nodeType) && n.data.parentNodeId && removedBranchingNodeIds.has(n.data.parentNodeId)) {
+            outputNodeIdsToRemove.add(n.id)
+            // Ensure output node is in the deletion batch
+            if (!filteredChanges.some((c) => c.type === 'remove' && c.id === n.id)) {
+              filteredChanges.push({
+                id: n.id,
+                type: 'remove',
+              })
+            }
+          }
         })
+
+        // Remove edges connected to these output nodes
+        if (outputNodeIdsToRemove.size > 0) {
+          setEdges((eds) => eds.filter((e) => !outputNodeIdsToRemove.has(e.source) && !outputNodeIdsToRemove.has(e.target)))
+        }
       }
 
       // If branching nodes are being moved, update their output node positions
@@ -644,34 +936,13 @@ function App() {
       setFlowConfigMenuPosition(null)
     }
 
-    // If clicking on an output node menu icon, ensure the output node is selected (not the parent)
-    const clickedNode = nodes.find((n) => n.id === nodeId)
-    if (clickedNode?.data?.nodeType && isBranchingOutputNodeType(clickedNode.data.nodeType as NodeType)) {
-      // Select the output node explicitly and deselect parent and all other nodes
-      setNodes((nds) => {
-        const updated = nds.map((n) => {
-          // Deselect parent if it exists
-          if (clickedNode.data?.parentNodeId && n.id === clickedNode.data.parentNodeId) {
-            return { ...n, selected: false }
-          }
-          // Select the clicked output node
-          if (n.id === nodeId) {
-            return { ...n, selected: true }
-          }
-          // Deselect all other nodes
-          return { ...n, selected: false }
-        })
-        return updated
-      })
-    } else {
-      // For non-output nodes, just ensure they're selected
-      setNodes((nds) => {
-        return nds.map((n) => ({
-          ...n,
-          selected: n.id === nodeId,
-        }))
-      })
-    }
+    // Deselect all nodes when opening menu - only the menu should be "selected" (focused)
+    setNodes((nds) => {
+      return nds.map((n) => ({
+        ...n,
+        selected: false,
+      }))
+    })
 
     // Use a tiny delay to ensure previous menu is fully closed before opening new one
     // This prevents the justOpenedRef from interfering
@@ -679,7 +950,7 @@ function App() {
       setOpenMenuNodeId(nodeId)
       setMenuPosition(null) // Reset position so menu opens at logical place next to node
     }, 0)
-  }, [nodes, setNodes, openMenuNodeId])
+  }, [nodes, setNodes, openMenuNodeId, isFlowConfigMenuOpen])
 
   const handleCloseMenu = useCallback(() => {
     setOpenMenuNodeId(null)
@@ -721,6 +992,14 @@ function App() {
       setIsFlowConfigMenuOpen(false)
       setFlowConfigMenuPosition(null)
     }
+  }, [])
+
+  const handleSelectionStart = useCallback((event: React.MouseEvent) => {
+    // Close menus when starting to select (shift+drag or box selection)
+    setOpenMenuNodeId(null)
+    setMenuPosition(null)
+    setIsFlowConfigMenuOpen(false)
+    setFlowConfigMenuPosition(null)
   }, [])
 
   const handleNodeDataUpdate = useCallback((nodeId: string, updatedData: any) => {
@@ -827,10 +1106,10 @@ function App() {
 
         // Recalculate branching node size
         const layoutConstants = getBranchingLayoutConstants()
-        const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight } = layoutConstants
+        const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing } = layoutConstants
         const newOutputCount = remainingOutputNodes.length
         const branchingNodeWidth = outputNodeWidth + padding * 2
-        const branchingNodeHeight = headerHeight + outputSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
+        const branchingNodeHeight = headerHeight + outputSpacing + firstOutputExtraSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
 
         // Update branching node
         const branchingIndex = updatedNodes.findIndex((n) => n.id === parentId)
@@ -1077,7 +1356,7 @@ function App() {
       })
 
       const layoutConstants = getBranchingLayoutConstants()
-      const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight } = layoutConstants
+      const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing } = layoutConstants
       const newIndex = existingOutputNodes.length
       const branchingPos = branchingNode.position || { x: 0, y: 0 }
       const newOutputCount = newIndex + 1
@@ -1105,9 +1384,18 @@ function App() {
       // Set label - use value if available, otherwise "_"
       outputNode.data.label = (outputValue !== null && outputValue !== undefined && outputValue !== '') ? String(outputValue) : '_'
 
+      // Set z-index to appear on top - find highest z-index among all nodes
+      const maxZIndex = updatedNodes.reduce((max, n) => {
+        const z = typeof n.zIndex === 'number' ? n.zIndex : 0
+        return Math.max(max, z)
+      }, highestZIndexRef.current)
+      const newZIndex = maxZIndex + 1
+      highestZIndexRef.current = newZIndex
+      outputNode.zIndex = newZIndex
+
       // Update branching node size
       const branchingNodeWidth = outputNodeWidth + padding * 2
-      const branchingNodeHeight = headerHeight + outputSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
+      const branchingNodeHeight = headerHeight + outputSpacing + firstOutputExtraSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
 
       return updatedNodes.map((node) =>
         node.id === nodeId
@@ -1121,13 +1409,93 @@ function App() {
     })
   }, [setNodes, saveHistoryBeforeChange, isLocked])
 
-  // Update nodes with label click handler, make output nodes non-draggable, and set zIndex for proper layering
-  // zIndex values come from nodeConfigs
+  // Update nodes with label click handler, make output nodes draggable for list param types, and set zIndex for proper layering
+  // zIndex values come from nodeConfigs, but we adjust them to keep branching node sets together
   // Also recalculate labels dynamically based on module config
+  // First pass: calculate consistent z-index "bands" for branching nodes and their outputs
+  // Each branching node + its outputs form a contiguous band:
+  // - branching node at bandZ
+  // - its outputs at bandZ + 1
+  // Bands themselves never interleave, so overlapping branching groups don't visually mingle.
+  const branchingNodeZIndexes = new Map<string, number>()
+
+  type BranchingDescriptor = {
+    id: string
+    selected: boolean
+    baseZ: number
+  }
+
+  const branchingDescriptors: BranchingDescriptor[] = nodes
+    .map((node) => {
+      const nodeType = (node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType
+      if (!isBranchingNodeType(nodeType)) return null
+      const config = nodeConfigs[nodeType]
+      const baseZ = node.zIndex ?? config?.zIndex ?? 10
+      return {
+        id: node.id,
+        selected: !!node.selected,
+        baseZ,
+      }
+    })
+    .filter((d): d is BranchingDescriptor => d !== null)
+
+  // Order bands so that:
+  // - unselected branching groups are below selected ones
+  // - within each group, preserve a stable order using baseZ then id
+  branchingDescriptors.sort((a, b) => {
+    if (a.selected !== b.selected) {
+      return a.selected ? 1 : -1
+    }
+    if (a.baseZ !== b.baseZ) {
+      return a.baseZ - b.baseZ
+    }
+    return a.id.localeCompare(b.id)
+  })
+
+  const BAND_SIZE = 10
+  let currentBandBase = 20 // keep above default single nodes (zIndex 2) and edges (zIndex 2)
+
+  branchingDescriptors.forEach((desc) => {
+    const parentZ = currentBandBase
+    branchingNodeZIndexes.set(desc.id, parentZ)
+    currentBandBase += BAND_SIZE
+  })
+
+  // Keep track of the highest z-index in use so newly created nodes can appear on top
+  if (currentBandBase > highestZIndexRef.current) {
+    highestZIndexRef.current = currentBandBase
+  }
+
   const nodesWithHandlers = nodes.map((node) => {
     const nodeType = (node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType
     const config = nodeConfigs[nodeType]
-    const zIndex = config?.zIndex ?? 2 // Default fallback
+    // Default zIndex for non-branching nodes: use existing or config default
+    let zIndex = node.zIndex ?? config?.zIndex ?? 2
+
+    // For branching nodes, use the band z-index we computed above
+    if (isBranchingNodeType(nodeType)) {
+      const bandZ = branchingNodeZIndexes.get(node.id)
+      if (bandZ !== undefined) {
+        zIndex = bandZ
+      }
+    } else if (isBranchingOutputNodeType(nodeType) && node.data?.parentNodeId) {
+      // Output nodes always sit just above their own parent, within the same band
+      const parentBandZ = branchingNodeZIndexes.get(node.data.parentNodeId)
+      if (parentBandZ !== undefined) {
+        zIndex = parentBandZ + 1
+      } else {
+        // Fallback if parent band not found: keep them slightly above their parent/config base
+        const parentNode = nodes.find((n) => n.id === node.data.parentNodeId)
+        const parentConfig = parentNode?.data?.nodeType ? nodeConfigs[parentNode.data.nodeType as NodeType] : undefined
+        const fallbackParentZ = parentNode?.zIndex ?? parentConfig?.zIndex ?? 10
+        zIndex = fallbackParentZ + 1
+      }
+    }
+
+    // Update highestZIndexRef to track the maximum z-index in use (for future node creations)
+    if (typeof zIndex === 'number' && zIndex > highestZIndexRef.current) {
+      highestZIndexRef.current = zIndex
+    }
 
     // Recalculate label based on module config
     const module = node.data?.moduleName ? modules.find((m) => m.name === node.data.moduleName) : undefined
@@ -1147,7 +1515,14 @@ function App() {
         onLabelClick: handleLabelClick,
         // No need for isInternalOutput flag - we check parent node type instead
       },
-      draggable: !(node.data?.nodeType && isBranchingOutputNodeType(node.data.nodeType as NodeType)), // Output nodes are not draggable - they move with parent
+      draggable: (() => {
+        // List param output nodes are draggable for reordering, others are not
+        const nodeType = node.data?.nodeType as NodeType | undefined
+        if (nodeType && isBranchingOutputNodeType(nodeType)) {
+          return canOutputNodeBeDeleted(nodeType) // Only list param output nodes (deletable ones) are draggable
+        }
+        return true // All other nodes are draggable
+      })(),
       selectable: (() => {
         // Output nodes that cannot be deleted should not be selectable
         const nodeType = node.data?.nodeType as NodeType | undefined
@@ -1157,21 +1532,21 @@ function App() {
         return true
       })(),
       zIndex,
+      // Add className to node for CSS animation targeting (ReactFlow applies this to the wrapper)
+      className: isBranchingOutputNodeType(nodeType) ? 'branching-output-node-wrapper' : undefined,
     }
   })
 
   return (
     <div className="app-root">
-      <main className="canvas-wrapper" ref={reactFlowWrapper}>
+      <main
+        className={`canvas-wrapper ${isBranchingDragging ? 'branching-drag-active' : ''}`}
+        ref={reactFlowWrapper}
+      >
         <Toolbar
           modules={modules}
           onNodeDragStart={onNodeDragStart}
           onSidebarNodeClick={onSidebarNodeClick}
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          onFitView={handleFitView}
-          isLocked={isLocked}
-          onLockToggle={() => setIsLocked((prev) => !prev)}
           showMinimap={showMinimap}
           onMinimapToggle={() => setShowMinimap((prev) => !prev)}
           hasNodes={nodes.length > 0}
@@ -1202,6 +1577,9 @@ function App() {
           onDragOver={onDragOver}
           onMove={onMove}
           onPaneClick={handlePaneClick}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          onSelectionStart={handleSelectionStart}
           isLocked={isLocked}
           viewport={viewport}
         />

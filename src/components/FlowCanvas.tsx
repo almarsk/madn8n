@@ -23,6 +23,9 @@ interface FlowCanvasProps {
   onDragOver: (event: React.DragEvent) => void
   onMove: (event: MouseEvent | TouchEvent | null, viewport: { x: number; y: number; zoom: number }) => void
   onPaneClick?: (event: React.MouseEvent) => void
+  onNodeDrag?: (event: React.MouseEvent | React.TouchEvent, node: Node) => void
+  onNodeDragStop?: (event: React.MouseEvent | React.TouchEvent, node: Node) => void
+  onSelectionStart?: (event: React.MouseEvent) => void
   isLocked: boolean
   viewport: { x: number; y: number; zoom: number }
 }
@@ -41,6 +44,9 @@ export default function FlowCanvas({
   onDragOver,
   onMove,
   onPaneClick,
+  onNodeDrag,
+  onNodeDragStop,
+  onSelectionStart,
   isLocked,
   viewport,
 }: FlowCanvasProps) {
@@ -67,6 +73,9 @@ export default function FlowCanvas({
       onDragOver={!isLocked ? onDragOver : undefined}
       onMove={onMove}
       onPaneClick={onPaneClick}
+      onNodeDrag={!isLocked ? onNodeDrag : undefined}
+      onNodeDragStop={!isLocked ? onNodeDragStop : undefined}
+      onSelectionStart={!isLocked ? onSelectionStart : undefined}
       nodesDraggable={!isLocked}
       nodesConnectable={!isLocked}
       elementsSelectable={!isLocked}

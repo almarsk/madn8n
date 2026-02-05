@@ -2,23 +2,28 @@ import { type Node } from 'reactflow'
 import nodeConfigs, { type NodeType, isBranchingOutputNodeType } from '../nodeConfigs'
 
 // Get branching node layout constants
+// Use the first branching config found (both should have same layout values)
 export const getBranchingLayoutConstants = () => {
-  const branchingConfig = nodeConfigs.branching
+  const branchingConfig = nodeConfigs.branchingInternal || nodeConfigs.branchingListParam
+  // Extra spacing for the first output to avoid crossing the header border line
+  const firstOutputExtraSpacing = 20
   if (!branchingConfig) {
     return {
       padding: 20,
       headerHeight: 50,
       outputSpacing: 10,
-      outputNodeWidth: 130,
+      outputNodeWidth: 220,
       outputNodeHeight: 60,
+      firstOutputExtraSpacing,
     }
   }
   return {
     padding: branchingConfig.padding || 20,
     headerHeight: branchingConfig.headerHeight || 50,
     outputSpacing: branchingConfig.outputSpacing || 10,
-    outputNodeWidth: branchingConfig.outputNodeWidth || 130,
+    outputNodeWidth: branchingConfig.outputNodeWidth || 220,
     outputNodeHeight: branchingConfig.outputNodeHeight || 60,
+    firstOutputExtraSpacing,
   }
 }
 
@@ -28,10 +33,16 @@ export const calculateOutputNodePosition = (
   index: number,
   layoutConstants = getBranchingLayoutConstants()
 ) => {
-  const { padding, headerHeight, outputSpacing, outputNodeHeight } = layoutConstants
+  const { padding, headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing } = layoutConstants
+  // Consistent spacing formula:
+  // Base position: headerHeight + outputSpacing + firstOutputExtraSpacing (applies to all nodes)
+  // Each node: base + index * (nodeHeight + spacing)
+  // This ensures: node0 at base, node1 at base+height+spacing, node2 at base+2*(height+spacing), etc.
+  const baseY = branchingPos.y + headerHeight + outputSpacing + firstOutputExtraSpacing
+  const y = baseY + index * (outputNodeHeight + outputSpacing)
   return {
     x: branchingPos.x + padding,
-    y: branchingPos.y + headerHeight + outputSpacing + index * (outputNodeHeight + outputSpacing),
+    y,
   }
 }
 

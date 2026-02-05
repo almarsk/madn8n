@@ -1,17 +1,19 @@
-import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from 'react'
+import { useState, useEffect, type MouseEvent as ReactMouseEvent } from 'react'
 import NodeList from './NodeList'
 
 import { type Module } from '../modules'
+import SettingsIcon from '@mui/icons-material/Settings'
+import MapIcon from '@mui/icons-material/Map'
+import FileDownloadIcon from '@mui/icons-material/FileDownload'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import UndoIcon from '@mui/icons-material/Undo'
+import RedoIcon from '@mui/icons-material/Redo'
+import Tooltip from '@mui/material/Tooltip'
 
 interface ToolbarProps {
   modules: Module[]
   onNodeDragStart: (type: string) => (event: React.DragEvent) => void
   onSidebarNodeClick: (moduleName: string) => void
-  onZoomIn: () => void
-  onZoomOut: () => void
-  onFitView: () => void
-  isLocked: boolean
-  onLockToggle: () => void
   showMinimap: boolean
   onMinimapToggle: () => void
   onExportJson: () => void
@@ -29,11 +31,6 @@ export default function Toolbar({
   modules,
   onNodeDragStart,
   onSidebarNodeClick,
-  onZoomIn,
-  onZoomOut,
-  onFitView,
-  isLocked,
-  onLockToggle,
   showMinimap,
   onMinimapToggle,
   onExportJson,
@@ -155,7 +152,10 @@ export default function Toolbar({
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const deltaY = moveEvent.clientY - startY
-      let nextHeight = Math.max(160, height + deltaY)
+      // Calculate minimum height based on header + minimum body content
+      // Header is ~40px, minimum body should allow at least the button bar (~60px)
+      const minHeight = 100
+      let nextHeight = Math.max(minHeight, height + deltaY)
 
       // Constrain height to viewport
       const viewportHeight = window.innerHeight
@@ -201,72 +201,99 @@ export default function Toolbar({
       </div>
 
       {!isToolbarMinimized && (
-        <div className="nodes-toolbar-body">
+        <div className="nodes-toolbar-body" style={{ minHeight: 0, maxHeight: '100%', overflow: 'hidden' }}>
           <section className="nodes-toolbar-section">
             <div className="toolbar-nav">
-              <button
-                type="button"
-                className="toolbar-nav-button flow-config-button"
-                onClick={onOpenFlowConfigMenu}
-                title="Flow Configuration"
-              >
-                ⚙️
-              </button>
-              <button
-                type="button"
-                className={`toolbar-nav-button ${showMinimap ? 'toolbar-lock-button--active' : ''}`}
-                onClick={onMinimapToggle}
-                disabled={!hasNodes}
-                title={hasNodes ? (showMinimap ? 'Hide minimap' : 'Show minimap') : 'No nodes to display'}
-                style={{
-                  opacity: hasNodes ? 1 : 0.5,
-                  cursor: hasNodes ? 'pointer' : 'not-allowed',
-                }}
-              >
-                🗺️
-              </button>
-              <button
-                type="button"
-                className="toolbar-nav-button"
-                onClick={onExportJson}
-                title="Export JSON to console"
-              >
-                📋
-              </button>
-              <button
-                type="button"
-                className="toolbar-nav-button"
-                onClick={onValidate}
-                title="Validate flow"
-              >
-                ✓
-              </button>
-              <button
-                type="button"
-                className="toolbar-nav-button"
-                onClick={onUndo}
-                disabled={!canUndo}
-                title="Undo (Ctrl+Z)"
-                style={{
-                  opacity: canUndo ? 1 : 0.5,
-                  cursor: canUndo ? 'pointer' : 'not-allowed',
-                }}
-              >
-                ↶
-              </button>
-              <button
-                type="button"
-                className="toolbar-nav-button"
-                onClick={onRedo}
-                disabled={!canRedo}
-                title="Redo (Ctrl+Shift+Z)"
-                style={{
-                  opacity: canRedo ? 1 : 0.5,
-                  cursor: canRedo ? 'pointer' : 'not-allowed',
-                }}
-              >
-                ↷
-              </button>
+              <div className="toolbar-nav-row">
+                <Tooltip title="Flow configuration" arrow placement="top" disableInteractive>
+                  <button
+                    type="button"
+                    className="toolbar-nav-button flow-config-button"
+                    onClick={onOpenFlowConfigMenu}
+                  >
+                    <SettingsIcon fontSize="small" />
+                  </button>
+                </Tooltip>
+                <Tooltip
+                  title={
+                    hasNodes
+                      ? showMinimap
+                        ? 'Hide minimap'
+                        : 'Show minimap'
+                      : 'No nodes to display'
+                  }
+                  arrow
+                  placement="top"
+                  disableInteractive
+                >
+                  <span>
+                    <button
+                      type="button"
+                      className={`toolbar-nav-button ${showMinimap ? 'toolbar-lock-button--active' : ''}`}
+                      onClick={onMinimapToggle}
+                      disabled={!hasNodes}
+                      style={{
+                        opacity: hasNodes ? 1 : 0.5,
+                        cursor: hasNodes ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      <MapIcon fontSize="small" />
+                    </button>
+                  </span>
+                </Tooltip>
+                <Tooltip title="Export flow as JSON (console)" arrow placement="top" disableInteractive>
+                  <button
+                    type="button"
+                    className="toolbar-nav-button"
+                    onClick={onExportJson}
+                  >
+                    <FileDownloadIcon fontSize="small" />
+                  </button>
+                </Tooltip>
+                <Tooltip title="Validate flow" arrow placement="top" disableInteractive>
+                  <button
+                    type="button"
+                    className="toolbar-nav-button"
+                    onClick={onValidate}
+                  >
+                    <CheckCircleIcon fontSize="small" />
+                  </button>
+                </Tooltip>
+              </div>
+              <div className="toolbar-nav-row toolbar-nav-row--secondary">
+                <Tooltip title="Undo (Ctrl+Z)" arrow placement="top" disableInteractive>
+                  <span>
+                    <button
+                      type="button"
+                      className="toolbar-nav-button"
+                      onClick={onUndo}
+                      disabled={!canUndo}
+                      style={{
+                        opacity: canUndo ? 1 : 0.5,
+                        cursor: canUndo ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      <UndoIcon fontSize="small" />
+                    </button>
+                  </span>
+                </Tooltip>
+                <Tooltip title="Redo (Ctrl+Shift+Z)" arrow placement="top" disableInteractive>
+                  <span>
+                    <button
+                      type="button"
+                      className="toolbar-nav-button"
+                      onClick={onRedo}
+                      disabled={!canRedo}
+                      style={{
+                        opacity: canRedo ? 1 : 0.5,
+                        cursor: canRedo ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      <RedoIcon fontSize="small" />
+                    </button>
+                  </span>
+                </Tooltip>
+              </div>
             </div>
           </section>
           <section className="nodes-toolbar-section" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -277,6 +304,20 @@ export default function Toolbar({
                 placeholder="Search modules..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onMouseDown={(e) => {
+                  // Prevent text selection when clicking on empty input (placeholder text)
+                  if (!searchQuery) {
+                    e.preventDefault()
+                    e.currentTarget.focus()
+                  }
+                }}
+                onSelect={(e) => {
+                  // Prevent selecting placeholder text when input is empty
+                  if (!searchQuery) {
+                    e.preventDefault()
+                    e.currentTarget.setSelectionRange(0, 0)
+                  }
+                }}
                 style={{
                   width: '100%',
                   padding: '0.5rem',

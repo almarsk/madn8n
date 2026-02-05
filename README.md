@@ -11,6 +11,8 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
     - text editor
 - maintenance
     - refactoring
+    - unit
+    - cypress
 
 ## Features
 

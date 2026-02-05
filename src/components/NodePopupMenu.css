@@ -38,10 +38,8 @@
   white-space: nowrap;
 }
 
-.node-popup-menu-close {
+.node-popup-menu-icon-button {
   padding: 0.25rem 0.5rem;
-  font-size: 1.2rem;
-  line-height: 1;
   border: none;
   border-radius: 0.375rem;
   background: transparent;
@@ -55,13 +53,26 @@
   height: 24px;
 }
 
-.node-popup-menu-close:hover {
+.node-popup-menu-icon-button:hover {
   background: rgba(148, 163, 184, 0.2);
   color: rgba(226, 232, 240, 0.95);
 }
 
-.node-popup-menu-close:active {
+.node-popup-menu-icon-button:active {
   background: rgba(148, 163, 184, 0.3);
+}
+
+.node-popup-menu-delete {
+  color: rgba(239, 68, 68, 0.85);
+}
+
+.node-popup-menu-delete:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: rgba(254, 242, 242, 0.98);
+}
+
+.node-popup-menu-delete:active {
+  background: rgba(239, 68, 68, 0.26);
 }
 
 .node-popup-menu-content {
@@ -112,4 +123,24 @@
 
 .number-input-no-arrows {
   -moz-appearance: textfield;
+}
+
+/* Enhanced focus styles for all input fields in the menu */
+.node-popup-menu input:not([type="checkbox"]):focus,
+.node-popup-menu textarea:focus,
+.node-popup-menu select:focus {
+  outline: none;
+  border-color: rgba(96, 165, 250, 0.9) !important;
+  background: rgba(15, 23, 42, 1) !important;
+  box-shadow:
+    0 0 0 2px rgba(96, 165, 250, 0.3),
+    0 4px 12px rgba(30, 64, 175, 0.4) !important;
+  transition: all 0.2s ease;
+}
+
+/* Additional highlight for focused inputs */
+.node-popup-menu input:not([type="checkbox"]):focus,
+.node-popup-menu textarea:focus,
+.node-popup-menu select:focus {
+  border-width: 2px;
 }

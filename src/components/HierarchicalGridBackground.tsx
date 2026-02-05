@@ -25,37 +25,75 @@ const GRID_LEVELS = [
 export default function HierarchicalGridBackground({ zoom }: HierarchicalGridBackgroundProps) {
   // Calculate opacity for each grid level based on how close zoom is to optimal zoom
   const levelsWithOpacity = useMemo(() => {
-    return GRID_LEVELS.map(level => {
+    // First compute distance from optimal zoom for each level
+    const levelsWithDistance = GRID_LEVELS.map(level => {
       // Calculate how far zoom is from optimal zoom (in log scale for smoother transitions)
       const zoomRatio = zoom / level.optimalZoom
       const logRatio = Math.log2(zoomRatio)
-      
-      // Opacity peaks at optimal zoom and fades as you move away
-      // Use a bell curve-like function for smooth transitions
       const distance = Math.abs(logRatio)
-      let opacity = 0
-      
-      if (distance <= 0.5) {
-        // At optimal zoom, softer opacity
-        opacity = 0.3
-      } else if (distance <= 1) {
-        // Fade out as you move away
-        opacity = 0.3 * (1 - (distance - 0.5) * 2)
-      } else if (distance <= 2) {
-        // Continue fading
-        opacity = 0.15 * (1 - (distance - 1))
-      } else {
-        // Very low opacity when far from optimal
-        opacity = 0.05
-      }
-      
-      // Ensure minimum visibility threshold
-      if (opacity < 0.08) {
-        opacity = 0
-      }
-      
-      return { ...level, opacity: Math.max(0, Math.min(0.3, opacity)) }
+      return { ...level, distance }
     })
+
+    // Find the "primary" grid level (closest to current zoom)
+    const primaryLevel = levelsWithDistance.reduce((best, curr) => {
+      if (!best) return curr
+      return curr.distance < best.distance ? curr : best
+    }, levelsWithDistance[0])
+
+    const result = levelsWithDistance.map(levelWithDistance => {
+      const { distance } = levelWithDistance
+      let opacity = 0
+
+      // Primary level: always visible, with soft falloff as zoom moves away
+      if (levelWithDistance === primaryLevel) {
+        if (distance <= 0.3) {
+          opacity = 0.5
+        } else if (distance <= 0.8) {
+          opacity = 0.4
+        } else if (distance <= 1.5) {
+          opacity = 0.3
+        } else {
+          opacity = 0.2
+        }
+      } else {
+        // Secondary level: only show if it's reasonably close to primary
+        const delta = Math.abs(distance - primaryLevel.distance)
+        if (delta < 0.4) {
+          opacity = 0.18
+        } else if (delta < 0.8) {
+          opacity = 0.12
+        } else {
+          opacity = 0
+        }
+      }
+
+      // Clamp to safe range
+      if (opacity < 0) opacity = 0
+      if (opacity > 0.5) opacity = 0.5
+
+      return { size: levelWithDistance.size, gap: levelWithDistance.gap, optimalZoom: levelWithDistance.optimalZoom, opacity }
+    })
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        location:'HierarchicalGridBackground.tsx:52',
+        message:'grid opacity computed',
+        data:{
+          zoom,
+          levels: result.map(l => ({ size: l.size, gap: l.gap, opacity: l.opacity }))
+        },
+        timestamp:Date.now(),
+        sessionId:'debug-session',
+        runId:'run1',
+        hypothesisId:'A'
+      })
+    }).catch(()=>{})
+    // #endregion
+
+    return result
   }, [zoom])
 
   return (

@@ -71,7 +71,7 @@ export const createNodeFromConfig = (
     position,
     data: nodeData,
     style: {
-      width: config.defaultWidth ?? 150,
+      width: config.defaultWidth ?? 180,
       height: config.defaultHeight ?? 80,
     },
     zIndex: config.zIndex ?? 2,
@@ -109,12 +109,17 @@ export const createBranchingNodeWithOutputs = (
   const padding = branchingConfig.padding || 20
   const headerHeight = branchingConfig.headerHeight || 50
   const outputSpacing = branchingConfig.outputSpacing || 10
-  const outputNodeWidth = branchingConfig.outputNodeWidth || 130
+  const outputNodeWidth = branchingConfig.outputNodeWidth || 220
   const outputNodeHeight = branchingConfig.outputNodeHeight || 60
+  // Extra spacing for the first output to avoid crossing the header border line
+  // This should match the value in getBranchingLayoutConstants
+  const firstOutputExtraSpacing = 20
 
   // Calculate branching node size based on output count
+  // Use the standard output node width (all nodes should be same width)
   const branchingNodeWidth = outputNodeWidth + padding * 2
-  const branchingNodeHeight = headerHeight + outputSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding
+  // Height calculation must account for firstOutputExtraSpacing
+  const branchingNodeHeight = headerHeight + outputSpacing + firstOutputExtraSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding
 
   const branchingNodeId = getId()
 
@@ -182,12 +187,14 @@ export const createBranchingNodeWithOutputs = (
       outputIndex: i, // Store index for reference
     }
 
+    // Use the same spacing calculation as in branchingNodeHelpers for consistency
+    const firstOutputExtraSpacing = i === 0 ? 20 : 0
     const outputNode: Node = {
       id: getId(),
       type: REACTFLOW_NODE_TYPE,
       position: {
         x: position.x + padding,
-        y: position.y + headerHeight + outputSpacing + i * (outputNodeHeight + outputSpacing),
+        y: position.y + headerHeight + outputSpacing + firstOutputExtraSpacing + i * (outputNodeHeight + outputSpacing),
       },
       data: outputNodeData,
       style: {

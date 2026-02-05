@@ -76,10 +76,10 @@ export const createOutputNodes = (
 
 // Helper to calculate branching node dimensions
 export const calculateBranchingNodeSize = (outputCount: number, layoutConstants = getBranchingLayoutConstants()) => {
-  const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight } = layoutConstants
+  const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing } = layoutConstants
   return {
     width: outputNodeWidth + padding * 2,
-    height: headerHeight + outputSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding,
+    height: headerHeight + outputSpacing + firstOutputExtraSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding,
   }
 }
 
