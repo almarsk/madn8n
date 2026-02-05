@@ -5,8 +5,9 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
 ## TODO
 
 - maddie fication
-    - stickers
     - corresponding json
+    - start and end
+    - stickers
 - maintenance
     - refactoring
     - unit

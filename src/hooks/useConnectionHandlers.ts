@@ -110,11 +110,12 @@ export function useConnectionHandlers({
           return currentEdges
         }
 
-        // Create new edge with arrow at the end
-        // Arrow marker will be positioned at the handle, CSS will adjust for better visual connection
+        // Determine z-index based on source node
+        // If source is an output node, we'll need to get its z-index from the nodes
+        // For now, default to 2, but this will be updated in App.tsx when edges are rendered
         const newEdge = {
           ...params,
-          zIndex: 2, // Edges above branching nodes (1) but same as other nodes
+          zIndex: 2, // Default, will be adjusted in App.tsx based on source node
           markerEnd: {
             type: MarkerType.ArrowClosed,
             width: 20,

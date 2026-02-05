@@ -10,6 +10,7 @@ import { useValidation } from './hooks/useValidation'
 import { getBranchingLayoutConstants, calculateOutputNodePosition, repositionOutputNodes } from './utils/branchingNodeHelpers'
 import { exportFlowToJson } from './utils/exportHelpers'
 import { translateReactFlowToCustom, type CustomFlowMetadata } from './utils/translationHelpers'
+import { autoLayout } from './utils/layoutHelpers'
 import { getDefaultValueForParamType } from './utils/branchingNodeOperations'
 
 import Toolbar from './components/Toolbar'
@@ -26,7 +27,7 @@ const initialEdges: any[] = []
 function App() {
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
-  const [isLocked, setIsLocked] = useState(false)
+  const [isLocked] = useState(false)
   const [showMinimap, setShowMinimap] = useState(false)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const [openMenuNodeId, setOpenMenuNodeId] = useState<string | null>(null)
@@ -388,18 +389,6 @@ function App() {
     },
     [reactFlowInstance, setNodes, modules, saveHistoryBeforeChange, isLocked, setOpenMenuNodeId, setMenuPosition]
   )
-
-  const handleZoomIn = () => {
-    reactFlowInstance?.zoomIn?.()
-  }
-
-  const handleZoomOut = () => {
-    reactFlowInstance?.zoomOut?.()
-  }
-
-  const handleFitView = () => {
-    reactFlowInstance?.fitView?.({ padding: 0.2 })
-  }
 
   const onMove = useCallback(
     (_event: MouseEvent | TouchEvent | null, viewport: { x: number; y: number; zoom: number }) => {
@@ -1013,7 +1002,7 @@ function App() {
     }
   }, [])
 
-  const handleSelectionStart = useCallback((event: React.MouseEvent) => {
+  const handleSelectionStart = useCallback((_event: React.MouseEvent) => {
     // Close menus when starting to select (shift+drag or box selection)
     setOpenMenuNodeId(null)
     setMenuPosition(null)
@@ -1606,14 +1595,35 @@ function App() {
           toolbarRef={toolbarRef}
           onOpenFlowConfigMenu={handleOpenFlowConfigMenu}
           onOpenJsonEditor={handleOpenJsonEditor}
+          onAutoLayout={() => {
+            if (!nodes.length) return
+            // Save history before applying automatic layout
+            if (!isLocked) {
+              saveHistoryBeforeChange('other')
+            }
+            setNodes((current) => autoLayout(current, edges))
+          }}
         />
 
         <FlowCanvas
           nodes={nodesWithHandlers}
-          edges={edges.map((edge) => ({
-            ...edge,
-            zIndex: edge.zIndex ?? 2, // Edges above branching nodes (1) but below output nodes (3)
-          }))}
+          edges={edges.map((edge) => {
+            // Determine z-index based on source node
+            // If source is an output node, use the same z-index as the output node
+            const sourceNode = nodes.find((n) => n.id === edge.source)
+            const sourceNodeType = sourceNode?.data?.nodeType as NodeType | undefined
+            let edgeZIndex = edge.zIndex ?? 2
+
+            if (sourceNode && sourceNodeType && isBranchingOutputNodeType(sourceNodeType)) {
+              // Use the same z-index as the output node
+              edgeZIndex = sourceNode.zIndex ?? 11
+            }
+
+            return {
+              ...edge,
+              zIndex: edgeZIndex,
+            }
+          })}
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={onConnect}

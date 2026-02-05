@@ -8,6 +8,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import UndoIcon from '@mui/icons-material/Undo'
 import RedoIcon from '@mui/icons-material/Redo'
 import CodeIcon from '@mui/icons-material/Code'
+import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import Tooltip from '@mui/material/Tooltip'
 
 interface ToolbarProps {
@@ -25,6 +26,7 @@ interface ToolbarProps {
   toolbarRef: React.RefObject<HTMLDivElement>
   onOpenFlowConfigMenu: () => void
   onOpenJsonEditor: () => void
+  onAutoLayout: () => void
 }
 
 export default function Toolbar({
@@ -42,6 +44,7 @@ export default function Toolbar({
   toolbarRef,
   onOpenFlowConfigMenu,
   onOpenJsonEditor,
+  onAutoLayout,
 }: ToolbarProps) {
   const [toolbarPosition, setToolbarPosition] = useState({ x: 16, y: 16 })
   const [toolbarSize, setToolbarSize] = useState({ width: 280, height: 260 })
@@ -250,6 +253,27 @@ export default function Toolbar({
                       }}
                     >
                       <CheckCircleIcon fontSize="small" />
+                    </button>
+                  </span>
+                </Tooltip>
+                <Tooltip
+                  title={hasNodes ? 'Auto layout flow' : 'No nodes to layout'}
+                  arrow
+                  placement="top"
+                  disableInteractive
+                >
+                  <span>
+                    <button
+                      type="button"
+                      className="toolbar-nav-button"
+                      onClick={onAutoLayout}
+                      disabled={!hasNodes}
+                      style={{
+                        opacity: hasNodes ? 1 : 0.5,
+                        cursor: hasNodes ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      <AccountTreeIcon fontSize="small" />
                     </button>
                   </span>
                 </Tooltip>

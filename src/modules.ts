@@ -36,6 +36,13 @@ export interface Module {
     outputLabels?: string[]
     // Documentation string for the module (displayed as tooltip)
     documentation?: string
+    // Default handlers for this module (e.g., "node_exit" for single nodes, "on_0", "on_1" for branching)
+    handlers?: string[]
+    // Source configuration (optional)
+    source?: {
+        path?: string
+        unpack_params?: boolean
+    }
 }
 
 const modules: Module[] = [
@@ -55,6 +62,11 @@ const modules: Module[] = [
             "type": "listParam",
             "listParamName": "outputs"
         },
+        "handlers": ["on_0", "on_1"],
+        "source": {
+            "path": "",
+            "unpack_params": true
+        },
         "documentation": "Placeholder documentation for Branching module"
     },
     {
@@ -68,6 +80,11 @@ const modules: Module[] = [
             "outputCount": 2
         },
         "outputLabels": ["Output 1", "Output 2"],
+        "handlers": ["on_0", "on_1"],
+        "source": {
+            "path": "",
+            "unpack_params": true
+        },
         "documentation": "Placeholder documentation for Branching2 module"
     },
     {
@@ -89,6 +106,11 @@ const modules: Module[] = [
             }
         ],
         "labelParam": "what",
+        "handlers": ["node_exit"],
+        "source": {
+            "path": "",
+            "unpack_params": true
+        },
         "documentation": "Placeholder documentation for Type 1 module"
     },
     {
@@ -102,6 +124,11 @@ const modules: Module[] = [
             }
         ],
         "labelParam": "what",
+        "handlers": ["node_exit"],
+        "source": {
+            "path": "",
+            "unpack_params": true
+        },
         "documentation": "Placeholder documentation for Type 2 module"
     },
     {
@@ -115,6 +142,11 @@ const modules: Module[] = [
             }
         ],
         "labelParam": "what",
+        "handlers": ["node_exit"],
+        "source": {
+            "path": "",
+            "unpack_params": true
+        },
         "documentation": "Placeholder documentation for Type Q module"
     }
 ]
