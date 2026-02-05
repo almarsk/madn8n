@@ -66,8 +66,8 @@
   box-shadow:
     0 18px 45px rgba(15, 23, 42, 0.9),
     0 0 0 1px rgba(15, 23, 42, 0.9),
-    0 0 20px rgba(96, 165, 250, 0.3),
-    inset 0 0 30px rgba(96, 165, 250, 0.1);
+    0 0 10px rgba(96, 165, 250, 0.15),
+    inset 0 0 15px rgba(96, 165, 250, 0.05);
   backdrop-filter: blur(16px);
   color: #e5e7eb;
   overflow: hidden;
@@ -520,7 +520,7 @@
   -ms-user-select: none;
   pointer-events: all;
   display: flex;
-  align-items: stretch;
+  align-items: center; /* Vertically center labels */
   justify-content: center !important;
   gap: 6px;
   width: 100%;
@@ -573,6 +573,30 @@
   min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+/* When menu icon is present, ensure text is still centered by adjusting the label container */
+.dynamic-node-label:has(.dynamic-node-label-menu-opener) {
+  position: relative;
+  justify-content: space-between;
+}
+
+.dynamic-node-label:has(.dynamic-node-label-menu-opener) .dynamic-node-label-text {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  pointer-events: none; /* Allow clicks to pass through to menu icon */
+  z-index: 0;
+}
+
+.dynamic-node-label:has(.dynamic-node-label-menu-opener) .dynamic-node-label-menu-opener {
+  position: relative;
+  z-index: 1;
+  margin-left: auto; /* Push to the right */
+  flex-shrink: 0; /* Prevent shrinking */
 }
 
 .dynamic-node-label-menu-opener {

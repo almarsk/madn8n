@@ -351,61 +351,119 @@ export function autoLayout(
         }
       }
       
-      // For nodes with inputs, position them based on handle positions to minimize edge length
+      // For nodes with inputs, position them based on handle positions to minimize edge length and crossings
       const inputs = incomingEdges.get(id) || []
       if (inputs.length > 0 && level > 0) {
-        // Calculate average position of source nodes, considering handle positions
-        let totalSourceX = 0
-        let totalSourceY = 0
-        let validSources = 0
-        let handleOffsetY = 0 // Accumulated offset based on handle positions
+        // Determine primary handle direction from inputs
+        let verticalHandles = 0 // top/bottom handles
+        let horizontalHandles = 0 // left/right handles
         
         for (const input of inputs) {
-          const sourcePos = positions.get(input.sourceId)
-          if (sourcePos) {
-            totalSourceX += sourcePos.x
-            totalSourceY += sourcePos.y
-            validSources++
-            
-            // Adjust based on handle positions
-            // If source handle is 'bottom', target should be below (positive Y offset)
-            // If source handle is 'top', target should be above (negative Y offset)
-            // If target handle is 'top', target should be above source
-            // If target handle is 'bottom', target should be below source
-            if (input.sourceHandle === 'bottom' || input.targetHandle === 'top') {
-              handleOffsetY -= NODE_Y_SPACING * 0.3 // Position above
-            } else if (input.sourceHandle === 'top' || input.targetHandle === 'bottom') {
-              handleOffsetY += NODE_Y_SPACING * 0.3 // Position below
-            }
+          const sourceHandle = input.sourceHandle || ''
+          const targetHandle = input.targetHandle || ''
+          
+          // Count vertical handles (top/bottom)
+          if (sourceHandle.includes('top') || sourceHandle.includes('bottom') || 
+              targetHandle.includes('top') || targetHandle.includes('bottom')) {
+            verticalHandles++
+          }
+          // Count horizontal handles (left/right)
+          if (sourceHandle.includes('left') || sourceHandle.includes('right') || 
+              targetHandle.includes('left') || targetHandle.includes('right')) {
+            horizontalHandles++
           }
         }
         
-        if (validSources > 0) {
-          const avgSourceX = totalSourceX / validSources
-          const avgSourceY = totalSourceY / validSources
+        // If primarily vertical handles (top/bottom), arrange vertically
+        // If primarily horizontal handles (left/right), arrange horizontally
+        // Otherwise use default grid
+        
+        if (verticalHandles > horizontalHandles && inputs.length === 1) {
+          // Arrange vertically - position directly below/above source
+          const sourcePos = positions.get(inputs[0].sourceId)
+          if (sourcePos) {
+            const sourceHandle = inputs[0].sourceHandle || ''
+            const targetHandle = inputs[0].targetHandle || ''
+            
+            // Position directly aligned with source X, but at correct level
+            x = sourcePos.x
+            // Keep Y at grid position but adjust based on handle
+            if (sourceHandle.includes('bottom') || targetHandle.includes('top')) {
+              y = sourcePos.y + NODE_Y_SPACING * 1.5 // Position below source
+            } else if (sourceHandle.includes('top') || targetHandle.includes('bottom')) {
+              y = sourcePos.y - NODE_Y_SPACING * 1.5 // Position above source
+            } else {
+              y = baseY + row * NODE_Y_SPACING // Default grid position
+            }
+          }
+        } else if (horizontalHandles > verticalHandles && inputs.length === 1) {
+          // Arrange horizontally - position directly left/right of source
+          const sourcePos = positions.get(inputs[0].sourceId)
+          if (sourcePos) {
+            const sourceHandle = inputs[0].sourceHandle || ''
+            const targetHandle = inputs[0].targetHandle || ''
+            
+            // Position directly aligned with source Y, but at correct level
+            y = sourcePos.y
+            // Keep X at grid position but adjust based on handle
+            if (sourceHandle.includes('right') || targetHandle.includes('left')) {
+              x = sourcePos.x + NODE_X_SPACING * 1.5 // Position to the right of source
+            } else if (sourceHandle.includes('left') || targetHandle.includes('right')) {
+              x = sourcePos.x - NODE_X_SPACING * 1.5 // Position to the left of source
+            } else {
+              x = gridStartX + col * NODE_X_SPACING // Default grid position
+            }
+          }
+        } else {
+          // Default: use grid with slight adjustments based on handles
+          let totalSourceX = 0
+          let totalSourceY = 0
+          let validSources = 0
+          let handleOffsetX = 0
+          let handleOffsetY = 0
           
-          // Position node closer to its sources - aim for a position that's:
-          // - At the correct level (x = baseX)
-          // - Aligned with sources (y = avgSourceY) + handle offset
-          // But keep it within grid bounds
-          const rowCenterY = baseY + row * NODE_Y_SPACING
-          const baseAdjustment = avgSourceY - rowCenterY
-          const handleAdjustedOffset = handleOffsetY / validSources // Average handle offset
-          const adjustmentRange = NODE_Y_SPACING * 0.6 // Allow 60% adjustment to get closer to sources
-          const totalAdjustment = baseAdjustment + handleAdjustedOffset
-          const yAdjustment = Math.max(-adjustmentRange, Math.min(adjustmentRange, totalAdjustment))
+          for (const input of inputs) {
+            const sourcePos = positions.get(input.sourceId)
+            if (sourcePos) {
+              totalSourceX += sourcePos.x
+              totalSourceY += sourcePos.y
+              validSources++
+              
+              // Adjust based on handle positions
+              if (input.sourceHandle === 'bottom-source' || input.targetHandle === 'top-target') {
+                handleOffsetY += NODE_Y_SPACING * 0.5
+              } else if (input.sourceHandle === 'top-source' || input.targetHandle === 'bottom-target') {
+                handleOffsetY -= NODE_Y_SPACING * 0.5
+              }
+              if (input.sourceHandle === 'right-source' || input.targetHandle === 'left-target') {
+                handleOffsetX += NODE_X_SPACING * 0.3
+              } else if (input.sourceHandle === 'left-source' || input.targetHandle === 'right-target') {
+                handleOffsetX -= NODE_X_SPACING * 0.3
+              }
+            }
+          }
           
-          // Position directly aligned with source to minimize edge length
-          y = rowCenterY + yAdjustment
-          
-          // For X, if we have a single source, we can position slightly closer
-          if (validSources === 1) {
-            // Position slightly to the left of the level to be closer to source
-            const sourceX = totalSourceX
-            const targetX = baseX
-            // If source is significantly to the left, we can move this node a bit left too
-            if (sourceX < targetX - LEVEL_X_SPACING * 0.3) {
-              x = Math.max(gridStartX, targetX - LEVEL_X_SPACING * 0.15)
+          if (validSources > 0) {
+            const avgSourceX = totalSourceX / validSources
+            const avgSourceY = totalSourceY / validSources
+            const rowCenterY = baseY + row * NODE_Y_SPACING
+            const handleAdjustedOffsetY = handleOffsetY / validSources
+            const handleAdjustedOffsetX = handleOffsetX / validSources
+            
+            const baseAdjustmentY = avgSourceY - rowCenterY
+            const adjustmentRange = NODE_Y_SPACING * 0.8
+            const totalAdjustmentY = baseAdjustmentY + handleAdjustedOffsetY
+            const yAdjustment = Math.max(-adjustmentRange, Math.min(adjustmentRange, totalAdjustmentY))
+            
+            y = rowCenterY + yAdjustment
+            
+            if (validSources === 1) {
+              const sourceX = totalSourceX
+              const targetX = baseX
+              const xAdjustment = handleAdjustedOffsetX
+              if (Math.abs(sourceX - targetX) > LEVEL_X_SPACING * 0.2) {
+                x = Math.max(gridStartX, Math.min(gridStartX + (cols - 1) * NODE_X_SPACING, targetX + xAdjustment))
+              }
             }
           }
         }

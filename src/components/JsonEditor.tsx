@@ -25,8 +25,12 @@ interface JsonEditorProps {
 type JsonFormat = 'custom' | 'reactflow'
 
 export default function JsonEditor({ initialJson, initialReactFlowData, initialMetadata, currentNodes, currentEdges, currentMetadata, onClose, onSave }: JsonEditorProps) {
-  const [jsonFormat, setJsonFormat] = useState<JsonFormat>('custom')
-  const [jsonText, setJsonText] = useState(() => JSON.stringify(initialJson, null, 2))
+  // Remember last used format from localStorage
+  const [jsonFormat, setJsonFormat] = useState<JsonFormat>(() => {
+    const saved = localStorage.getItem('jsonEditorFormat')
+    return (saved === 'reactflow' || saved === 'custom') ? saved : 'custom'
+  })
+  const [jsonText, setJsonText] = useState(() => JSON.stringify(initialJson, null, 4))
   const [validationResult, setValidationResult] = useState<{ isValid: boolean | null; message: string }>({
     isValid: null,
     message: '',
@@ -34,40 +38,43 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
   const [isCopied, setIsCopied] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)
   const userHasEditedRef = useRef(false) // Track if user has manually edited JSON
+  const hasInitializedRef = useRef(false) // Track if we've initialized from initialJson
   
   // Store ReactFlow data for format switching
   const reactFlowDataRef = useRef<{ nodes: any[]; edges: any[] } | null>(initialReactFlowData || null)
   const metadataRef = useRef<CustomFlowMetadata | null>(initialMetadata || null)
   
-  // Sync with canvas changes - update editor content when canvas changes (unless user is editing)
+  // Initialize from initialJson on mount (only once)
+  // For custom format, use initialJson (which is already translated)
+  // For reactflow format, use initialReactFlowData
   useEffect(() => {
-    if (userHasEditedRef.current || !currentNodes || !currentEdges) return
+    if (!hasInitializedRef.current) {
+      if (jsonFormat === 'custom' && initialJson) {
+        setJsonText(JSON.stringify(initialJson, null, 4))
+      } else if (jsonFormat === 'reactflow' && initialReactFlowData) {
+        setJsonText(JSON.stringify(initialReactFlowData, null, 4))
+      }
+      hasInitializedRef.current = true
+    }
+  }, [initialJson, initialReactFlowData, jsonFormat])
+  
+  // Sync with canvas changes - only for ReactFlow format
+  // For custom format, we don't auto-sync - it's only translated on open and save
+  useEffect(() => {
+    if (userHasEditedRef.current || !currentNodes || !currentEdges || !hasInitializedRef.current) return
     
-    try {
-      if (jsonFormat === 'custom') {
+    // Only auto-sync for ReactFlow format, not custom format
+    if (jsonFormat === 'reactflow') {
+      try {
         const reactFlowData = { nodes: currentNodes, edges: currentEdges }
-        const metadata = currentMetadata || initialMetadata || {
-          description: '',
-          language: '',
-          mchannels_bot_id: '',
-          name: '',
-          omnichannel_config: {},
-          stickers: {},
-        }
-        const customData = translateReactFlowToCustom(reactFlowData, metadata)
-        setJsonText(JSON.stringify(customData, null, 2))
-        reactFlowDataRef.current = reactFlowData
-        metadataRef.current = metadata
-      } else {
-        const reactFlowData = { nodes: currentNodes, edges: currentEdges }
-        setJsonText(JSON.stringify(reactFlowData, null, 2))
+        setJsonText(JSON.stringify(reactFlowData, null, 4))
         reactFlowDataRef.current = reactFlowData
         metadataRef.current = currentMetadata || initialMetadata || null
+      } catch (error) {
+        console.error('Error syncing JSON editor:', error)
       }
-    } catch (error) {
-      console.error('Error syncing JSON editor:', error)
     }
-  }, [currentNodes, currentEdges, currentMetadata, jsonFormat, initialMetadata, translateReactFlowToCustom])
+  }, [currentNodes, currentEdges, currentMetadata, jsonFormat, initialMetadata])
 
   // Focus textarea on mount
   useEffect(() => {
@@ -95,24 +102,23 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
           return
         }
 
-        const { reactFlowData, metadata } = translateCustomToReactFlow(parsed as CustomFlowJson)
+        const { reactFlowData, metadata } = translateCustomToReactFlow(
+          parsed as CustomFlowJson,
+          currentNodes,
+          currentEdges
+        )
         reactFlowDataRef.current = reactFlowData
         metadataRef.current = metadata
-        setJsonText(JSON.stringify(reactFlowData, null, 2))
+        setJsonText(JSON.stringify(reactFlowData, null, 4))
         setJsonFormat('reactflow')
+        localStorage.setItem('jsonEditorFormat', 'reactflow')
         setValidationResult({ isValid: null, message: '' })
+        userHasEditedRef.current = false // Reset edit flag when switching
       } else {
-        // Switch to Custom format
-        const parsed = JSON.parse(jsonText)
-        if (!parsed.nodes || !parsed.edges) {
-          setValidationResult({
-            isValid: false,
-            message: 'Invalid ReactFlow JSON: missing nodes or edges',
-          })
-          return
-        }
-
-        const metadata = metadataRef.current || {
+        // Switch to Custom format - translate current ReactFlow data from canvas
+        // Always use current canvas state, not stored ref
+        const reactFlowData = { nodes: currentNodes || [], edges: currentEdges || [] }
+        const metadata = currentMetadata || metadataRef.current || {
           description: '',
           language: '',
           mchannels_bot_id: '',
@@ -120,10 +126,15 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
           omnichannel_config: {},
           stickers: {},
         }
-        const customData = translateReactFlowToCustom(parsed, metadata)
-        setJsonText(JSON.stringify(customData, null, 2))
+        const customData = translateReactFlowToCustom(reactFlowData, metadata)
+        setJsonText(JSON.stringify(customData, null, 4))
         setJsonFormat('custom')
+        localStorage.setItem('jsonEditorFormat', 'custom')
         setValidationResult({ isValid: null, message: '' })
+        userHasEditedRef.current = false // Reset edit flag when switching
+        // Update refs for future use
+        reactFlowDataRef.current = reactFlowData
+        metadataRef.current = metadata
       }
     } catch (error) {
       setValidationResult({
@@ -195,7 +206,11 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
           return
         }
 
-        const { reactFlowData, metadata } = translateCustomToReactFlow(parsed as CustomFlowJson)
+        const { reactFlowData, metadata } = translateCustomToReactFlow(
+          parsed as CustomFlowJson,
+          currentNodes,
+          currentEdges
+        )
         reactFlowDataRef.current = reactFlowData
         metadataRef.current = metadata
         onSave(reactFlowData, metadata)
@@ -288,6 +303,23 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
                 setJsonText(e.target.value)
                 setValidationResult({ isValid: null, message: '' })
                 userHasEditedRef.current = true // Mark that user has edited
+              }}
+              onKeyDown={(e) => {
+                // Allow Tab key to insert tab character instead of moving focus
+                if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                  e.preventDefault()
+                  const textarea = e.currentTarget
+                  const start = textarea.selectionStart
+                  const end = textarea.selectionEnd
+                  const newValue = jsonText.substring(0, start) + '\t' + jsonText.substring(end)
+                  setJsonText(newValue)
+                  // Restore cursor position after tab
+                  setTimeout(() => {
+                    textarea.selectionStart = textarea.selectionEnd = start + 1
+                  }, 0)
+                }
+                // Allow Ctrl+F / Cmd+F for find (browser default)
+                // Don't prevent default for Ctrl+F
               }}
               className="json-editor-textarea"
               spellCheck={false}

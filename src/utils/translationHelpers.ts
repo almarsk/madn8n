@@ -1,8 +1,9 @@
-import { type Node, type Edge } from 'reactflow'
+import { type Node, type Edge, MarkerType } from 'reactflow'
 import { type NodeType, isBranchingOutputNodeType, isBranchingNodeType } from '../nodeConfigs'
 import modules from '../modules'
 import { REACTFLOW_NODE_TYPE, createBranchingNodeWithOutputs, createNodeFromConfig } from './nodeCreation'
 import { autoLayout } from './layoutHelpers'
+import { calculateOutputNodePosition, getBranchingLayoutConstants, calculateBranchingNodeHeight, updateBranchingNodeHeight } from './branchingNodeHelpers'
 
 // Custom JSON format types
 export interface CustomFlowMetadata {
@@ -142,7 +143,40 @@ function buildDialogFromReactFlow(
       moduleTypeString = 'Exit'
     }
 
-    const params = (node.data?.params || {}) as Record<string, any>
+    let params = (node.data?.params || {}) as Record<string, any>
+
+    // For branching nodes with listParam, extract the listParam array from output nodes
+    if (isBranchingNodeType(nodeType) && moduleMeta?.outputConfig?.type === 'listParam') {
+      const listParamName = moduleMeta.outputConfig.listParamName
+      // Find all output nodes for this branching node
+      const outputNodes = reactFlowData.nodes.filter(
+        (n) => n.data?.parentNodeId === nodeId && isBranchingOutputNodeType(n.data?.nodeType as NodeType)
+      )
+      // Sort by outputIndex to maintain order
+      outputNodes.sort((a, b) => {
+        const aIndex = a.data?.outputIndex ?? 0
+        const bIndex = b.data?.outputIndex ?? 0
+        return aIndex - bIndex
+      })
+      // Extract values from output nodes and build array
+      // Always include all output nodes, even if they have empty values
+      let listParamArray: any[] = []
+      if (outputNodes.length > 0) {
+        listParamArray = outputNodes.map((outputNode) => {
+          // Get value from output node's params.value
+          return outputNode.data?.params?.value ?? ''
+        })
+      } else {
+        // If no output nodes found but this is a listParam branching node,
+        // create at least one empty entry (default output)
+        listParamArray = ['']
+      }
+      // Add the listParam array to params
+      params = {
+        ...params,
+        [listParamName]: listParamArray,
+      }
+    }
 
     // Build source field from module config
     const source: DialogModule['source'] = moduleMeta?.source
@@ -204,6 +238,7 @@ function buildDialogFromReactFlow(
   let rootModule = ''
 
   // If start node exists, use its outgoing edge target as root_module
+  // Find start node and its outgoing edge to determine root_module
   if (startNodeId) {
     const startEdge = reactFlowData.edges.find((e) => e.source === startNodeId)
     if (startEdge) {
@@ -353,8 +388,13 @@ export function translateReactFlowToCustom(
 
 /**
  * Translate Custom JSON format back to ReactFlow JSON
+ * Optionally preserves existing nodes/edges to maintain layout and ReactFlow-specific data
  */
-export function translateCustomToReactFlow(customData: CustomFlowJson): {
+export function translateCustomToReactFlow(
+  customData: CustomFlowJson,
+  existingNodes?: Node[],
+  existingEdges?: Edge[]
+): {
   reactFlowData: ReactFlowJson
   metadata: CustomFlowMetadata
 } {
@@ -362,6 +402,16 @@ export function translateCustomToReactFlow(customData: CustomFlowJson): {
 
   const reactFlowNodes: Node[] = []
   const reactFlowEdges: Edge[] = []
+
+  // Create maps of existing nodes/edges by ID for quick lookup
+  const existingNodesMap = new Map<string, Node>()
+  const existingEdgesMap = new Map<string, Edge>()
+  if (existingNodes) {
+    existingNodes.forEach((n) => existingNodesMap.set(n.id, n))
+  }
+  if (existingEdges) {
+    existingEdges.forEach((e) => existingEdgesMap.set(e.id, e))
+  }
 
   if (dialog && dialog.modules) {
     const entries = Object.entries(dialog.modules)
@@ -384,19 +434,26 @@ export function translateCustomToReactFlow(customData: CustomFlowJson): {
       const nodeType: NodeType =
         (moduleMeta?.type as NodeType) ?? ('single' as NodeType)
 
-      const params = (moduleDef.params || {}) as Record<string, any>
+      let params = (moduleDef.params || {}) as Record<string, any>
 
       if (isBranchingNodeType(nodeType) && moduleMeta?.outputConfig) {
         // Branching node – create parent + output nodes using helper
         let outputCount = 1
+        let listParamArray: any[] | null = null
+        
         if (moduleMeta.outputConfig.type === 'internal') {
           outputCount = moduleMeta.outputConfig.outputCount
         } else if (moduleMeta.outputConfig.type === 'listParam') {
           const listParamName = moduleMeta.outputConfig.listParamName
-          const currentArray = Array.isArray(params[listParamName])
+          listParamArray = Array.isArray(params[listParamName])
             ? params[listParamName]
             : []
-          outputCount = currentArray.length || 1
+          outputCount = listParamArray.length || 1
+          
+          // Remove listParam from params since it will be represented by output nodes
+          // We'll restore it when translating back, but for ReactFlow it's in output nodes
+          const { [listParamName]: _, ...paramsWithoutListParam } = params
+          params = paramsWithoutListParam
         }
 
         const created = createBranchingNodeWithOutputs(
@@ -407,7 +464,11 @@ export function translateCustomToReactFlow(customData: CustomFlowJson): {
         )
 
         // First node is the branching parent
-        const parentNode = { ...created[0] }
+        // Preserve existing node if it exists (position, z-index, etc.)
+        const existingParent = existingNodesMap.get(moduleId)
+        const parentNode = existingParent
+          ? { ...existingParent }
+          : { ...created[0] }
         parentNode.id = moduleId
         parentNode.data = {
           ...parentNode.data,
@@ -415,31 +476,109 @@ export function translateCustomToReactFlow(customData: CustomFlowJson): {
           nodeType,
           params,
         }
+        // Preserve position from existing node if available
+        if (existingParent) {
+          parentNode.position = existingParent.position
+          if (existingParent.width) parentNode.width = existingParent.width
+          if (existingParent.zIndex !== undefined) parentNode.zIndex = existingParent.zIndex
+        }
+        // Calculate correct height based on output count (will be updated after outputs are created)
+        const layoutConstants = getBranchingLayoutConstants()
+        const calculatedHeight = calculateBranchingNodeHeight(outputCount, layoutConstants)
+        const branchingNodeWidth = layoutConstants.outputNodeWidth + layoutConstants.padding * 2
+        parentNode.style = {
+          ...parentNode.style,
+          width: branchingNodeWidth,
+          height: calculatedHeight,
+        }
+        parentNode.width = branchingNodeWidth
+        parentNode.height = calculatedHeight
 
         reactFlowNodes.push(parentNode)
         branchingParentIds.add(moduleId)
 
         const outputs: Node[] = []
         for (let i = 1; i < created.length; i++) {
-          const out = { ...created[i] }
-          out.data = {
-            ...out.data,
-            parentNodeId: moduleId,
+          const createdOutput = created[i]
+          const outputIndex = i - 1 // outputIndex is 0-based
+          
+          // Try to find existing output node by matching parentNodeId and outputIndex
+          const existingOutput = existingNodes?.find(
+            (n) =>
+              n.data?.parentNodeId === moduleId &&
+              n.data?.outputIndex === outputIndex
+          )
+          const out = existingOutput
+            ? { ...existingOutput }
+            : { ...createdOutput }
+          
+          // For listParam type, set the value from the array
+          if (moduleMeta.outputConfig.type === 'listParam' && listParamArray) {
+            const value = listParamArray[outputIndex] ?? ''
+            out.data = {
+              ...out.data,
+              parentNodeId: moduleId,
+              outputIndex: outputIndex,
+              params: {
+                ...out.data?.params,
+                value: value,
+              },
+            }
+          } else {
+            out.data = {
+              ...out.data,
+              parentNodeId: moduleId,
+              outputIndex: outputIndex,
+            }
+          }
+          
+          // Preserve position from existing node if available, otherwise calculate correct position
+          if (existingOutput) {
+            out.position = existingOutput.position
+            if (existingOutput.width) out.width = existingOutput.width
+            if (existingOutput.height) out.height = existingOutput.height
+            if (existingOutput.zIndex !== undefined) out.zIndex = existingOutput.zIndex
+          } else {
+            // Calculate correct position relative to parent branching node
+            const parentPos = parentNode.position || { x: 0, y: 0 }
+            const layoutConstants = getBranchingLayoutConstants()
+            out.position = calculateOutputNodePosition(parentPos, outputIndex, layoutConstants)
+            // Set width and height from layout constants
+            out.width = layoutConstants.outputNodeWidth
+            out.height = layoutConstants.outputNodeHeight
           }
           outputs.push(out)
           reactFlowNodes.push(out)
         }
         outputNodesByParent.set(moduleId, outputs)
       } else {
-        // Simple node
-        const node = createNodeFromConfig(nodeType, { x: 0, y: 0 }, {
+        // Simple node - preserve existing node if it exists
+        const existingNode = existingNodesMap.get(moduleId)
+        const node = existingNode
+          ? { ...existingNode }
+          : createNodeFromConfig(nodeType, { x: 0, y: 0 }, {
+              moduleName: moduleMeta?.name || moduleTypeStr,
+              params,
+            })
+        node.id = moduleId
+        node.data = {
+          ...node.data,
           moduleName: moduleMeta?.name || moduleTypeStr,
           params,
-        })
-        node.id = moduleId
+        }
+        // Preserve position and other properties from existing node if available
+        if (existingNode) {
+          node.position = existingNode.position
+          if (existingNode.width) node.width = existingNode.width
+          if (existingNode.height) node.height = existingNode.height
+          if (existingNode.zIndex !== undefined) node.zIndex = existingNode.zIndex
+        }
         reactFlowNodes.push(node)
       }
     }
+
+    // Track added edge IDs to prevent duplicates
+    const addedEdgeIds = new Set<string>()
 
     // Second pass: build ReactFlow edges from handlers
     for (const [moduleId, moduleDef] of entries) {
@@ -460,44 +599,136 @@ export function translateCustomToReactFlow(customData: CustomFlowJson): {
         }
 
         const edgeId = `e_${sourceId}_${targetId}_${key}`
-        reactFlowEdges.push({
-          id: edgeId,
-          source: sourceId,
-          target: targetId,
-          type: 'default',
-        } as Edge)
+        // Skip if we've already added this edge
+        if (addedEdgeIds.has(edgeId)) {
+          return
+        }
+        addedEdgeIds.add(edgeId)
+
+        // Preserve existing edge if it exists (handles, style, markerEnd, etc.)
+        const existingEdge = existingEdgesMap.get(edgeId) ||
+          existingEdges?.find((e) => e.source === sourceId && e.target === targetId)
+        const edge = existingEdge
+          ? { 
+              ...existingEdge, 
+              id: edgeId, 
+              source: sourceId, 
+              target: targetId,
+              // Preserve all edge properties
+              markerEnd: existingEdge.markerEnd,
+              markerStart: existingEdge.markerStart,
+              style: existingEdge.style,
+              animated: existingEdge.animated,
+              hidden: existingEdge.hidden,
+              selected: existingEdge.selected,
+              zIndex: existingEdge.zIndex,
+            }
+          : ({
+              id: edgeId,
+              source: sourceId,
+              target: targetId,
+              type: 'default',
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                width: 20,
+                height: 20,
+                color: 'rgba(148, 163, 184, 0.8)',
+              },
+              style: {
+                strokeWidth: 2,
+                stroke: 'rgba(148, 163, 184, 0.8)',
+              },
+            } as Edge)
+        reactFlowEdges.push(edge)
       })
     }
 
-    // Create start node if root_module exists - start node's handler points to root_module
+    // Create or update start node if root_module exists - start node's handler points to root_module
     const rootModuleId = dialog.root_module || undefined
     if (rootModuleId && reactFlowNodes.length > 0) {
       const startModule = modules.find((m) => m.name === 'Start')
       if (startModule) {
-        // Find the root module node to position start node to its left
-        const rootNode = reactFlowNodes.find((n) => n.id === rootModuleId)
-        const startPosition = rootNode
-          ? { x: rootNode.position.x - 250, y: rootNode.position.y }
-          : { x: 0, y: 0 }
+        // Find existing start node
+        const existingStartNode = existingNodes?.find((n) => n.data?.moduleName === 'Start')
+        
+        let startNode: Node
+        if (existingStartNode) {
+          // Preserve existing start node position and properties
+          startNode = { ...existingStartNode }
+          startNode.data = {
+            ...startNode.data,
+            moduleName: 'Start',
+            connectingFrom: null,
+          }
+        } else {
+          // Create new start node - position it to the left of root module
+          const rootNode = reactFlowNodes.find((n) => n.id === rootModuleId)
+          const startPosition = rootNode
+            ? { x: rootNode.position.x - 250, y: rootNode.position.y }
+            : { x: 0, y: 0 }
+          startNode = createNodeFromConfig(startModule.type as NodeType, startPosition, {
+            moduleName: 'Start',
+            connectingFrom: null,
+          })
+        }
 
-        const startNode = createNodeFromConfig(startModule.type as NodeType, startPosition, {
-          moduleName: 'Start',
-          connectingFrom: null,
-        })
+        // Check if edge from start to root already exists
+        const startEdgeId = `start_${rootModuleId}`
+        if (!addedEdgeIds.has(startEdgeId)) {
+          addedEdgeIds.add(startEdgeId)
+          const existingStartEdge = existingEdgesMap.get(startEdgeId) ||
+            existingEdges?.find(
+              (e) => e.source === startNode.id && e.target === rootModuleId
+            )
+          if (existingStartEdge) {
+            // Preserve existing edge with all properties
+            reactFlowEdges.push({
+              ...existingStartEdge,
+              id: startEdgeId,
+              source: startNode.id,
+              target: rootModuleId,
+              // Preserve all edge properties
+              markerEnd: existingStartEdge.markerEnd,
+              markerStart: existingStartEdge.markerStart,
+              style: existingStartEdge.style,
+              animated: existingStartEdge.animated,
+              hidden: existingStartEdge.hidden,
+              selected: existingStartEdge.selected,
+              zIndex: existingStartEdge.zIndex,
+            })
+          } else {
+            // Create new edge with arrow head
+            reactFlowEdges.push({
+              id: startEdgeId,
+              source: startNode.id,
+              target: rootModuleId,
+              type: 'default',
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                width: 20,
+                height: 20,
+                color: 'rgba(148, 163, 184, 0.8)',
+              },
+              style: {
+                strokeWidth: 2,
+                stroke: 'rgba(148, 163, 184, 0.8)',
+              },
+            } as Edge)
+          }
+        }
 
-        // Add edge from start node to root module
-        reactFlowNodes.push(startNode)
-        reactFlowEdges.push({
-          id: `start_${rootModuleId}`,
-          source: startNode.id,
-          target: rootModuleId,
-          type: 'default',
-        } as Edge)
+        // Add start node if it's not already in the list
+        if (!reactFlowNodes.find((n) => n.id === startNode.id)) {
+          reactFlowNodes.push(startNode)
+        }
       }
     }
 
-    // Apply automatic layout – use dialog.root_module as a hint
-    const laidOutNodes = autoLayout(reactFlowNodes, reactFlowEdges, rootModuleId)
+    // Only apply automatic layout if we don't have existing nodes to preserve
+    // This prevents breaking the layout when translating back
+    const laidOutNodes = existingNodes && existingNodes.length > 0
+      ? reactFlowNodes // Use nodes as-is, preserving positions
+      : autoLayout(reactFlowNodes, reactFlowEdges, rootModuleId) // Apply layout only for new graphs
 
     return {
       reactFlowData: {

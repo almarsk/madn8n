@@ -1,5 +1,5 @@
 import { type Node } from 'reactflow'
-import nodeConfigs, { type NodeType, isBranchingOutputNodeType } from '../nodeConfigs'
+import nodeConfigs, { type NodeType, isBranchingOutputNodeType, isBranchingNodeType } from '../nodeConfigs'
 
 // Get branching node layout constants
 // Use the first branching config found (both should have same layout values)
@@ -46,7 +46,61 @@ export const calculateOutputNodePosition = (
   }
 }
 
-// Reposition all output nodes for a branching node
+// Calculate branching node height based on number of output nodes
+export const calculateBranchingNodeHeight = (
+  outputCount: number,
+  layoutConstants?: ReturnType<typeof getBranchingLayoutConstants>
+): number => {
+  const constants = layoutConstants || getBranchingLayoutConstants()
+  const { headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing, padding } = constants
+  
+  if (outputCount === 0) {
+    // Minimum height: header + padding
+    return headerHeight + padding
+  }
+  
+  // Height = header + spacing + firstOutputExtraSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding
+  return headerHeight + outputSpacing + firstOutputExtraSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding
+}
+
+// Update branching node height based on its output nodes
+export const updateBranchingNodeHeight = (
+  nodes: Node[],
+  branchingNodeId: string,
+  layoutConstants?: ReturnType<typeof getBranchingLayoutConstants>
+): Node[] => {
+  const constants = layoutConstants || getBranchingLayoutConstants()
+  const branchingNode = nodes.find((n) => n.id === branchingNodeId)
+  if (!branchingNode) return nodes
+
+  // Count output nodes
+  const outputNodes = nodes.filter((n) => {
+    const nodeType = n.data?.nodeType as NodeType | undefined
+    return nodeType && isBranchingOutputNodeType(nodeType) && n.data.parentNodeId === branchingNodeId
+  })
+  
+  const outputCount = outputNodes.length
+  const newHeight = calculateBranchingNodeHeight(outputCount, constants)
+  const branchingNodeWidth = constants.outputNodeWidth + constants.padding * 2
+
+  return nodes.map((node) => {
+    if (node.id === branchingNodeId) {
+      return {
+        ...node,
+        style: {
+          ...node.style,
+          width: branchingNodeWidth,
+          height: newHeight,
+        },
+        width: branchingNodeWidth,
+        height: newHeight,
+      }
+    }
+    return node
+  })
+}
+
+// Reposition all output nodes for a branching node and update branching node height
 export const repositionOutputNodes = (
   nodes: Node[],
   branchingNodeId: string,
@@ -69,8 +123,9 @@ export const repositionOutputNodes = (
   })
 
   const branchingPos = branchingNode.position || { x: 0, y: 0 }
-
-  return nodes.map((node) => {
+  
+  // First update positions
+  let updatedNodes = nodes.map((node) => {
     const nodeType = node.data?.nodeType as NodeType | undefined
     if (nodeType && isBranchingOutputNodeType(nodeType) && node.data.parentNodeId === branchingNodeId) {
       const index = sortedOutputNodes.findIndex((n) => n.id === node.id)
@@ -87,4 +142,9 @@ export const repositionOutputNodes = (
     }
     return node
   })
+  
+  // Then update branching node height
+  updatedNodes = updateBranchingNodeHeight(updatedNodes, branchingNodeId, constants)
+
+  return updatedNodes
 }

@@ -4,7 +4,6 @@ import nodeConfigs, {
     type NodeType,
     isBranchingNodeType,
     isBranchingOutputNodeType,
-    canOutputNodeBeDeleted,
     NODE_TYPES,
 } from './nodeConfigs'
 import modules from './modules'
@@ -24,7 +23,7 @@ interface NodeFactoryData extends NodeConfig {
     parentNodeId?: string
 }
 
-function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
+function NodeFactory({ data, id }: NodeProps<NodeFactoryData>) {
     const { getNodes, getEdges, setNodes } = useReactFlow()
     const nodes = getNodes()
     const edges = getEdges()
@@ -96,10 +95,18 @@ function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
     const cursorStyle = hasOutgoingEdge ? 'default' : 'grab'
 
     // Check if menu should be shown - check module config
-    // Output nodes with isModuleType=false don't show menu, and modules with showMenu=false don't show menu
+    // For branching output nodes: show menu only if it's a listParam type (linked param), not internal
+    // For other nodes: show menu unless module has showMenu=false
     const moduleName = currentNode?.data?.moduleName
     const module = moduleName ? modules.find((m) => m.name === moduleName) : undefined
-    const showMenu = !isBranchingOutputNodeType(nodeType) && (module?.showMenu !== false)
+    let showMenu = false
+    if (isBranchingOutputNodeType(nodeType)) {
+        // Show menu for listParam output nodes (linked param), not for internal ones
+        showMenu = module?.outputConfig?.type === 'listParam'
+    } else {
+        // For non-output nodes, show menu unless explicitly disabled
+        showMenu = module?.showMenu !== false
+    }
 
     // For branching nodes, prevent clicks on the container from selecting the node
     // Only the header should be clickable for selection (but not menu opening - that's only via three dots)

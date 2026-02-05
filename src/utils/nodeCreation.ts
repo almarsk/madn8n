@@ -2,7 +2,7 @@ import { type Node } from 'reactflow'
 import nodeConfigs, { type NodeType, NODE_TYPES } from '../nodeConfigs'
 import modules from '../modules'
 import { parseType, getNodeLabel, getId } from './nodeUtils'
-import { getBranchingLayoutConstants, calculateOutputNodePosition } from './branchingNodeHelpers'
+import { getBranchingLayoutConstants, calculateOutputNodePosition, calculateBranchingNodeHeight } from './branchingNodeHelpers'
 
 // ReactFlow component type - all nodes use the NodeFactory component
 export const REACTFLOW_NODE_TYPE = 'nodeFactory'
@@ -107,21 +107,21 @@ export const createBranchingNodeWithOutputs = (
 
   const module = moduleName ? modules.find((m) => m.name === moduleName) : undefined
 
+  // Use the same layout constants and helper that branchingNodeHelpers uses so
+  // that initial creation and later repositioning are perfectly aligned.
+  const layoutConstants = getBranchingLayoutConstants()
+
   const padding = branchingConfig.padding || 20
   const headerHeight = branchingConfig.headerHeight || 50
   const outputSpacing = branchingConfig.outputSpacing || 10
   const outputNodeWidth = branchingConfig.outputNodeWidth || 220
   const outputNodeHeight = branchingConfig.outputNodeHeight || 60
-  // Extra spacing for the first output to avoid crossing the header border line.
-  // This MUST match the value used in getBranchingLayoutConstants to keep
-  // initial spacing consistent with subsequent reflows.
-  const firstOutputExtraSpacing = getBranchingLayoutConstants().firstOutputExtraSpacing
 
   // Calculate branching node size based on output count
   // Use the standard output node width (all nodes should be same width)
   const branchingNodeWidth = outputNodeWidth + padding * 2
-  // Height calculation must account for firstOutputExtraSpacing
-  const branchingNodeHeight = headerHeight + outputSpacing + firstOutputExtraSpacing + (outputCount * outputNodeHeight) + ((outputCount - 1) * outputSpacing) + padding
+  // Use helper function to calculate height
+  const branchingNodeHeight = calculateBranchingNodeHeight(outputCount, layoutConstants)
 
   const branchingNodeId = getId()
 
@@ -149,10 +149,6 @@ export const createBranchingNodeWithOutputs = (
   }
 
   const outputNodes: Node[] = []
-
-  // Use the same layout constants and helper that branchingNodeHelpers uses so
-  // that initial creation and later repositioning are perfectly aligned.
-  const layoutConstants = getBranchingLayoutConstants()
 
   for (let i = 0; i < outputCount; i++) {
     let outputParams: Record<string, any> = {}

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from 'react'
-import { ReactFlowInstance, useEdgesState, useNodesState, type Node } from 'reactflow'
+import { ReactFlowInstance, useEdgesState, useNodesState, type Node, MarkerType } from 'reactflow'
 import './App.css'
 import modules from './modules'
 import nodeConfigs, { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES, canOutputNodeBeDeleted } from './nodeConfigs'
@@ -7,7 +7,7 @@ import { useHistory } from './hooks/useHistory'
 import { createNodeFromConfig, createBranchingNodeWithOutputs } from './utils/nodeCreation'
 import { getNodeLabel } from './utils/nodeUtils'
 import { useValidation } from './hooks/useValidation'
-import { getBranchingLayoutConstants, calculateOutputNodePosition, repositionOutputNodes } from './utils/branchingNodeHelpers'
+import { getBranchingLayoutConstants, calculateOutputNodePosition, repositionOutputNodes, calculateBranchingNodeHeight, updateBranchingNodeHeight } from './utils/branchingNodeHelpers'
 import { exportFlowToJson } from './utils/exportHelpers'
 import { translateReactFlowToCustom, type CustomFlowMetadata } from './utils/translationHelpers'
 import { autoLayout } from './utils/layoutHelpers'
@@ -605,6 +605,40 @@ function App() {
     [setNodes, modules]
   )
 
+  // Helper function to position start node at default view location
+  const positionStartNodeAtDefaultView = useCallback(
+    (instance: ReactFlowInstance, currentNodes: Node[], duration: number = 0) => {
+      const startNode = currentNodes.find((n) => n.data?.moduleName === 'Start')
+      if (startNode) {
+        const bounds = reactFlowWrapper.current?.getBoundingClientRect()
+        if (bounds) {
+          // Calculate where Start node should appear on screen - closer to middle but still on left side
+          // Position at about 40% from left (closer to center than before)
+          const targetScreenX = bounds.width * 0.4
+          const targetScreenY = bounds.height * (1 / 3)
+          
+          // Use default zoom 0.7
+          const zoom = 0.7
+          const flowX = startNode.position.x
+          const flowY = startNode.position.y
+          
+          // Calculate viewport offset needed to position Start node at target screen position
+          const viewportX = -flowX * zoom + targetScreenX
+          const viewportY = -flowY * zoom + targetScreenY
+          
+          instance.setViewport({ x: viewportX, y: viewportY, zoom, duration })
+        }
+      } else if (currentNodes.length === 0) {
+        // Default zoom if no nodes
+        instance.setViewport({ x: 0, y: 0, zoom: 0.7, duration })
+      } else {
+        // Fit view with default zoom
+        instance.fitView({ padding: 0.2, minZoom: 0.7, maxZoom: 1.5, duration })
+      }
+    },
+    []
+  )
+
   const onInit = useCallback(
     (instance: ReactFlowInstance) => {
       setReactFlowInstance(instance)
@@ -619,9 +653,9 @@ function App() {
           if (startModule) {
             const bounds = reactFlowWrapper.current?.getBoundingClientRect()
             if (bounds) {
-              // Position start node at 2/3 right and 2/3 top of viewport
-              const targetX = bounds.width * (2 / 3)
-              const targetY = bounds.height * (2 / 3)
+              // Position start node closer to middle but still on left side (same as default view)
+              const targetX = bounds.width * 0.4
+              const targetY = bounds.height * (1 / 3)
               const position = instance.screenToFlowPosition({
                 x: targetX,
                 y: targetY,
@@ -639,35 +673,12 @@ function App() {
 
       // Set default zoom and position so Start node appears at 2/3 top-right of screen
       setTimeout(() => {
-        const startNode = nodes.find((n) => n.data?.moduleName === 'Start')
-        if (startNode) {
-          const bounds = reactFlowWrapper.current?.getBoundingClientRect()
-          if (bounds) {
-            // Calculate where Start node should appear on screen (2/3 right, 2/3 top)
-            const targetScreenX = bounds.width * (2 / 3)
-            const targetScreenY = bounds.height * (2 / 3)
-            
-            // Convert screen position to flow position at zoom 0.7
-            const zoom = 0.7
-            const flowX = startNode.position.x
-            const flowY = startNode.position.y
-            
-            // Calculate viewport offset needed to position Start node at target screen position
-            const viewportX = -flowX * zoom + targetScreenX
-            const viewportY = -flowY * zoom + targetScreenY
-            
-            instance.setViewport({ x: viewportX, y: viewportY, zoom })
-          }
-        } else if (nodes.length === 0) {
-          // Default zoom if no nodes
-          instance.setViewport({ x: 0, y: 0, zoom: 0.7 })
-        } else {
-          // Fit view with default zoom
-          instance.fitView({ padding: 0.2, minZoom: 0.7, maxZoom: 1.5, duration: 0 })
-        }
+        // Get current nodes from ReactFlow instance to ensure we have the latest
+        const currentNodes = instance.getNodes()
+        positionStartNodeAtDefaultView(instance, currentNodes, 0)
       }, 100)
     },
-    [nodes.length, setNodes]
+    [setNodes, positionStartNodeAtDefaultView]
   )
 
   // Wrap onEdgesChange to maintain compatibility and save history
@@ -1008,16 +1019,14 @@ function App() {
       return
     }
 
-    // Close any existing menu first to ensure clean state transition
-    // This prevents the justOpenedRef from blocking the new menu
+    // Close all other menus first (flow config, sticker, and other node menus)
+    setIsFlowConfigMenuOpen(false)
+    setFlowConfigMenuPosition(null)
+    setIsStickerMenuOpen(false)
+    setStickerMenuPosition(null)
     if (openMenuNodeId && openMenuNodeId !== nodeId) {
       setOpenMenuNodeId(null)
       setMenuPosition(null)
-    }
-    // Close flow config menu if open
-    if (isFlowConfigMenuOpen) {
-      setIsFlowConfigMenuOpen(false)
-      setFlowConfigMenuPosition(null)
     }
 
     // Deselect all nodes when opening menu - only the menu should be "selected" (focused)
@@ -1028,13 +1037,10 @@ function App() {
       }))
     })
 
-    // Use a tiny delay to ensure previous menu is fully closed before opening new one
-    // This prevents the justOpenedRef from interfering
-    setTimeout(() => {
-      setOpenMenuNodeId(nodeId)
-      setMenuPosition(null) // Reset position so menu opens at logical place next to node
-    }, 0)
-  }, [nodes, setNodes, openMenuNodeId, isFlowConfigMenuOpen])
+    // Open menu immediately - no delay needed since we closed all other menus
+    setOpenMenuNodeId(nodeId)
+    setMenuPosition(null) // Reset position so menu opens at logical place next to node
+  }, [nodes, setNodes, openMenuNodeId])
 
   const handleCloseMenu = useCallback(() => {
     setOpenMenuNodeId(null)
@@ -1042,9 +1048,13 @@ function App() {
   }, [])
 
   const handleOpenFlowConfigMenu = useCallback(() => {
-    // Close node menu if open
+    // Close all other menus first
     setOpenMenuNodeId(null)
     setMenuPosition(null)
+    setIsStickerMenuOpen(false)
+    setStickerMenuPosition(null)
+    
+    // Open flow config menu immediately
     setIsFlowConfigMenuOpen(true)
     setFlowConfigMenuPosition(null) // Will be auto-positioned next to toolbar
   }, [])
@@ -1053,13 +1063,13 @@ function App() {
   const [stickerMenuPosition, setStickerMenuPosition] = useState<{ x: number; y: number } | null>(null)
 
   const handleOpenStickerMenu = useCallback(() => {
-    // Close other menus
+    // Close all other menus first
     setOpenMenuNodeId(null)
     setMenuPosition(null)
     setIsFlowConfigMenuOpen(false)
     setFlowConfigMenuPosition(null)
 
-    // Open sticker menu
+    // Open sticker menu immediately
     setIsStickerMenuOpen(true)
     setStickerMenuPosition(null) // Will be auto-positioned next to toolbar
   }, [])
@@ -1112,6 +1122,9 @@ function App() {
 
   const handleNodeDataUpdate = useCallback((nodeId: string, updatedData: any) => {
     // Don't save history for param changes - only node add/remove and connections are in history
+    // Also preserve viewport position to prevent view from jumping
+    const currentViewport = reactFlowInstance?.getViewport()
+    
     setNodes((nds) => {
       return nds.map((node) => {
         if (node.id === nodeId) {
@@ -1135,7 +1148,14 @@ function App() {
         return node
       })
     })
-  }, [setNodes, saveHistoryBeforeChange, isLocked])
+    
+    // Restore viewport position after update to prevent view from jumping
+    if (currentViewport && reactFlowInstance) {
+      requestAnimationFrame(() => {
+        reactFlowInstance.setViewport(currentViewport)
+      })
+    }
+  }, [setNodes, reactFlowInstance])
 
   const handleDeleteNode = useCallback((nodeId: string) => {
     if (isLocked) return
@@ -1218,23 +1238,14 @@ function App() {
           }
         })
 
-        // Recalculate branching node size
+        // Update branching node params and outputCount
         const layoutConstants = getBranchingLayoutConstants()
-        const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing } = layoutConstants
         const newOutputCount = remainingOutputNodes.length
-        const branchingNodeWidth = outputNodeWidth + padding * 2
-        const branchingNodeHeight = headerHeight + outputSpacing + firstOutputExtraSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
-
-        // Update branching node
+        
         const branchingIndex = updatedNodes.findIndex((n) => n.id === parentId)
         if (branchingIndex >= 0) {
           updatedNodes[branchingIndex] = {
             ...updatedNodes[branchingIndex],
-            style: {
-              ...updatedNodes[branchingIndex].style,
-              width: branchingNodeWidth,
-              height: branchingNodeHeight,
-            },
             data: {
               ...updatedNodes[branchingIndex].data,
               params: {
@@ -1246,7 +1257,8 @@ function App() {
           }
         }
 
-        // Reposition remaining output nodes - this will use the updated outputIndex values
+        // Reposition remaining output nodes and update branching node height
+        // repositionOutputNodes now automatically updates height
         updatedNodes = repositionOutputNodes(updatedNodes, parentId, layoutConstants)
 
         return updatedNodes
@@ -1314,8 +1326,8 @@ function App() {
       stickers: metadata.stickers || {},
     })
 
-    // Reconstruct nodes properly - ensure they have all required ReactFlow properties
-    // Important: Deep merge node.data to preserve all properties including nested ones
+    // Reconstruct nodes properly - preserve positions and all properties
+    // Important: Preserve node positions from current canvas to avoid layout changes
     const reconstructedNodes: Node[] = reactFlowData.nodes.map((node) => {
       const originalNode = nodes.find((n) => n.id === node.id)
       
@@ -1332,11 +1344,14 @@ function App() {
         mergedData.connectingFrom = null
       }
       
+      // Preserve position from original node if it exists, otherwise use from JSON
+      const preservedPosition = originalNode?.position || node.position || { x: 0, y: 0 }
+      
       // Ensure node has all required properties
       const reconstructed: Node = {
         id: node.id,
         type: node.type || 'nodeFactory',
-        position: node.position || { x: 0, y: 0 },
+        position: preservedPosition, // Preserve original position to avoid layout changes
         data: mergedData,
         selected: false,
         // Preserve style and zIndex from original if available, otherwise use from node data
@@ -1349,17 +1364,68 @@ function App() {
       return reconstructed
     })
     
-    setNodes(reconstructedNodes)
-    setEdges(reactFlowData.edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      type: edge.type || 'default',
-    })))
+    // Preserve all edges with all properties including markerEnd (arrow heads), style, etc.
+    const preservedEdges = reactFlowData.edges.map((edge) => {
+      // Find original edge to preserve all properties
+      const originalEdge = edges.find((e) => e.id === edge.id || (e.source === edge.source && e.target === edge.target))
+      
+      // Default markerEnd if missing
+      const defaultMarkerEnd = {
+        type: MarkerType.ArrowClosed,
+        width: 20,
+        height: 20,
+        color: 'rgba(148, 163, 184, 0.8)',
+      }
+      
+      // Default style if missing
+      const defaultStyle = {
+        strokeWidth: 2,
+        stroke: 'rgba(148, 163, 184, 0.8)',
+      }
+      
+      return {
+        ...edge, // Start with edge from JSON (has updated source/target)
+        // Preserve all ReactFlow edge properties from original or from JSON
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle ?? originalEdge?.sourceHandle,
+        targetHandle: edge.targetHandle ?? originalEdge?.targetHandle,
+        type: edge.type || originalEdge?.type || 'default',
+        // Preserve arrow heads and styling - ensure markerEnd is always set
+        markerEnd: edge.markerEnd ?? originalEdge?.markerEnd ?? defaultMarkerEnd,
+        markerStart: edge.markerStart ?? originalEdge?.markerStart,
+        style: edge.style ?? originalEdge?.style ?? defaultStyle,
+        animated: edge.animated ?? originalEdge?.animated,
+        hidden: edge.hidden ?? originalEdge?.hidden,
+        selected: edge.selected ?? originalEdge?.selected,
+        zIndex: edge.zIndex ?? originalEdge?.zIndex,
+      }
+    })
+    
+    // Update branching node heights based on their output nodes
+    let finalNodes = reconstructedNodes
+    const layoutConstants = getBranchingLayoutConstants()
+    reconstructedNodes.forEach((node) => {
+      const nodeType = node.data?.nodeType as NodeType | undefined
+      if (nodeType && isBranchingNodeType(nodeType)) {
+        finalNodes = updateBranchingNodeHeight(finalNodes, node.id, layoutConstants)
+      }
+    })
+    
+    // Reposition output nodes to ensure correct positions
+    reconstructedNodes.forEach((node) => {
+      const nodeType = node.data?.nodeType as NodeType | undefined
+      if (nodeType && isBranchingNodeType(nodeType)) {
+        finalNodes = repositionOutputNodes(finalNodes, node.id, layoutConstants)
+      }
+    })
 
-    setIsJsonEditorOpen(false)
+    setNodes(finalNodes)
+    setEdges(preservedEdges)
+
+    // Don't close editor - let user continue editing
+    // setIsJsonEditorOpen(false)
   }, [nodes, setNodes, setEdges, saveHistoryBeforeChange])
 
   // Flag to prevent saving history during undo/redo operations
@@ -1559,19 +1625,21 @@ function App() {
       highestZIndexRef.current = newZIndex
       outputNode.zIndex = newZIndex
 
-      // Update branching node size
-      const branchingNodeWidth = outputNodeWidth + padding * 2
-      const branchingNodeHeight = headerHeight + outputSpacing + firstOutputExtraSpacing + (newOutputCount * outputNodeHeight) + ((newOutputCount - 1) * outputSpacing) + padding
-
-      return updatedNodes.map((node) =>
+      // Add the new output node
+      const nodesWithNewOutput = updatedNodes.concat(outputNode)
+      
+      // Update branching node height using helper function
+      const updatedWithHeight = updateBranchingNodeHeight(nodesWithNewOutput, nodeId, layoutConstants)
+      
+      // Also update outputCount in data
+      return updatedWithHeight.map((node) =>
         node.id === nodeId
           ? {
             ...node,
-            style: { ...node.style, width: branchingNodeWidth, height: branchingNodeHeight },
             data: { ...node.data, outputCount: newOutputCount },
           }
           : node
-      ).concat(outputNode)
+      )
     })
   }, [setNodes, saveHistoryBeforeChange, isLocked])
 
@@ -1739,8 +1807,12 @@ function App() {
           onOpenJsonEditor={handleOpenJsonEditor}
           onOpenStickerMenu={handleOpenStickerMenu}
           onFitView={() => {
-            if (reactFlowInstance && nodes.length > 0) {
-              reactFlowInstance.fitView({ padding: 0.2, duration: 300 })
+            if (reactFlowInstance) {
+              // Get current nodes from ReactFlow instance to ensure we have the latest state
+              const currentNodes = reactFlowInstance.getNodes()
+              if (currentNodes.length > 0) {
+                positionStartNodeAtDefaultView(reactFlowInstance, currentNodes, 300)
+              }
             }
           }}
           onAutoLayout={() => {
