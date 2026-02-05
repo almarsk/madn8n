@@ -4,10 +4,10 @@ import NodeList from './NodeList'
 import { type Module } from '../modules'
 import SettingsIcon from '@mui/icons-material/Settings'
 import MapIcon from '@mui/icons-material/Map'
-import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import UndoIcon from '@mui/icons-material/Undo'
 import RedoIcon from '@mui/icons-material/Redo'
+import CodeIcon from '@mui/icons-material/Code'
 import Tooltip from '@mui/material/Tooltip'
 
 interface ToolbarProps {
@@ -16,7 +16,6 @@ interface ToolbarProps {
   onSidebarNodeClick: (moduleName: string) => void
   showMinimap: boolean
   onMinimapToggle: () => void
-  onExportJson: () => void
   onValidate: () => void
   onUndo: () => void
   onRedo: () => void
@@ -25,6 +24,7 @@ interface ToolbarProps {
   hasNodes: boolean
   toolbarRef: React.RefObject<HTMLDivElement>
   onOpenFlowConfigMenu: () => void
+  onOpenJsonEditor: () => void
 }
 
 export default function Toolbar({
@@ -33,7 +33,6 @@ export default function Toolbar({
   onSidebarNodeClick,
   showMinimap,
   onMinimapToggle,
-  onExportJson,
   onValidate,
   onUndo,
   onRedo,
@@ -42,6 +41,7 @@ export default function Toolbar({
   hasNodes,
   toolbarRef,
   onOpenFlowConfigMenu,
+  onOpenJsonEditor,
 }: ToolbarProps) {
   const [toolbarPosition, setToolbarPosition] = useState({ x: 16, y: 16 })
   const [toolbarSize, setToolbarSize] = useState({ width: 280, height: 260 })
@@ -205,15 +205,6 @@ export default function Toolbar({
           <section className="nodes-toolbar-section">
             <div className="toolbar-nav">
               <div className="toolbar-nav-row">
-                <Tooltip title="Flow configuration" arrow placement="top" disableInteractive>
-                  <button
-                    type="button"
-                    className="toolbar-nav-button flow-config-button"
-                    onClick={onOpenFlowConfigMenu}
-                  >
-                    <SettingsIcon fontSize="small" />
-                  </button>
-                </Tooltip>
                 <Tooltip
                   title={
                     hasNodes
@@ -241,22 +232,43 @@ export default function Toolbar({
                     </button>
                   </span>
                 </Tooltip>
-                <Tooltip title="Export flow as JSON (console)" arrow placement="top" disableInteractive>
+                <Tooltip
+                  title={hasNodes ? 'Validate flow' : 'No nodes to validate'}
+                  arrow
+                  placement="top"
+                  disableInteractive
+                >
+                  <span>
+                    <button
+                      type="button"
+                      className="toolbar-nav-button"
+                      onClick={onValidate}
+                      disabled={!hasNodes}
+                      style={{
+                        opacity: hasNodes ? 1 : 0.5,
+                        cursor: hasNodes ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      <CheckCircleIcon fontSize="small" />
+                    </button>
+                  </span>
+                </Tooltip>
+                <Tooltip title="Open JSON editor" arrow placement="top" disableInteractive>
                   <button
                     type="button"
                     className="toolbar-nav-button"
-                    onClick={onExportJson}
+                    onClick={onOpenJsonEditor}
                   >
-                    <FileDownloadIcon fontSize="small" />
+                    <CodeIcon fontSize="small" />
                   </button>
                 </Tooltip>
-                <Tooltip title="Validate flow" arrow placement="top" disableInteractive>
+                <Tooltip title="Flow configuration" arrow placement="top" disableInteractive>
                   <button
                     type="button"
-                    className="toolbar-nav-button"
-                    onClick={onValidate}
+                    className="toolbar-nav-button flow-config-button"
+                    onClick={onOpenFlowConfigMenu}
                   >
-                    <CheckCircleIcon fontSize="small" />
+                    <SettingsIcon fontSize="small" />
                   </button>
                 </Tooltip>
               </div>

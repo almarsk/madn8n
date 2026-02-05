@@ -5,10 +5,8 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
 ## TODO
 
 - maddie fication
-    - main menu
-    - two way conversion between reactflow and maddie json
-- features
-    - text editor
+    - stickers
+    - corresponding json
 - maintenance
     - refactoring
     - unit

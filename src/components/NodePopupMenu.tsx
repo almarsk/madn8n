@@ -27,10 +27,20 @@ interface NodePopupMenuProps {
   isFlowConfig?: boolean
   flowMetadata?: {
     description: string
-    userInitialTimeout: number
-    voice: string
+    language: string
+    mchannels_bot_id: string
+    name: string
+    omnichannel_config?: Record<string, any>
+    stickers?: Record<string, any>
   }
-  onFlowMetadataUpdate?: (metadata: { description: string; userInitialTimeout: number; voice: string }) => void
+  onFlowMetadataUpdate?: (metadata: {
+    description: string
+    language: string
+    mchannels_bot_id: string
+    name: string
+    omnichannel_config?: Record<string, any>
+    stickers?: Record<string, any>
+  }) => void
   toolbarRef?: React.RefObject<HTMLDivElement>
   title?: string
 }
@@ -165,7 +175,6 @@ const renderParamInput = (
   }
 }
 
-const PLACEHOLDER_VOICES = ['Voice 1', 'Voice 2', 'Voice 3']
 
 export default function NodePopupMenu({
   node,
@@ -190,7 +199,7 @@ export default function NodePopupMenu({
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-  const [menuSize, setMenuSize] = useState({ width: 280, height: 180 })
+  const [menuSize, setMenuSize] = useState({ width: 360, height: 180 })
   const questionMarkRef = useRef<HTMLButtonElement | null>(null)
   const nodeType = node ? ((node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType) : undefined
   const module = node?.data?.moduleName ? modules.find((m: Module) => m.name === node.data.moduleName) : undefined
@@ -202,7 +211,16 @@ export default function NodePopupMenu({
   const [params, setParams] = useState<Record<string, any>>(node?.data?.params || {})
 
   // Initialize flow metadata state (only for flow config)
-  const [metadata, setMetadata] = useState(flowMetadata || { description: '', userInitialTimeout: 0, voice: 'Voice 1' })
+  const [metadata, setMetadata] = useState(
+    flowMetadata || {
+      description: '',
+      language: '',
+      mchannels_bot_id: '',
+      name: '',
+      omnichannel_config: {},
+      stickers: {},
+    }
+  )
 
   useEffect(() => {
     if (isFlowConfig && flowMetadata) {
@@ -238,6 +256,10 @@ export default function NodePopupMenu({
 
   // Track if position update is needed (prevent updates during undo/redo)
   const shouldUpdatePositionRef = useRef(true)
+  // Track when the user is actively resizing so we don't auto-close on outside click
+  const isResizingRef = useRef(false)
+  // Track a short grace period right after resizing ends to avoid accidental close
+  const resizeJustEndedRef = useRef(false)
 
   // Initialize position from initialPosition if provided
   useEffect(() => {
@@ -295,11 +317,13 @@ export default function NodePopupMenu({
 
       const viewportWidth = window.innerWidth
       const viewportHeight = window.innerHeight
+      // For flow config, allow the menu to extend fully to the right edge (no horizontal margin)
       const margin = 10
+      const horizontalMargin = isFlowConfig ? 0 : margin
 
-      const minX = margin
+      const minX = horizontalMargin
       const minY = margin
-      const maxX = viewportWidth - menuWidth - margin
+      const maxX = viewportWidth - menuWidth - horizontalMargin
       const maxY = viewportHeight - menuHeight - margin
 
       newPosition.x = Math.max(minX, Math.min(maxX, newPosition.x))
@@ -517,6 +541,11 @@ export default function NodePopupMenu({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      // Don't close while actively resizing the menu
+      if (isResizingRef.current || resizeJustEndedRef.current) {
+        return
+      }
+
       const target = event.target as HTMLElement
       const isMenuIcon = target.closest('.dynamic-node-label-menu-icon') !== null
       const isToolbar = target.closest('.nodes-toolbar') !== null
@@ -553,15 +582,18 @@ export default function NodePopupMenu({
       if (event.key === 'Escape') {
         onClose()
       } else if (event.key === 'Backspace') {
-        // Only close on backspace if the menu or one of its inputs is focused
         const activeElement = document.activeElement
         if (menuRef.current && activeElement && menuRef.current.contains(activeElement)) {
-          // Don't close if user is typing in an input/textarea (unless it's empty)
+          // Focus is inside the menu: only close if not actively editing non-empty input
           const isInput = activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA'
           if (!isInput || (isInput && (activeElement as HTMLInputElement | HTMLTextAreaElement).value === '')) {
             event.preventDefault()
             onClose()
           }
+        } else if (menuRef.current) {
+          // Focus is outside the menu (e.g. canvas): treat Backspace as a close shortcut
+          event.preventDefault()
+          onClose()
         }
       }
     }
@@ -611,32 +643,52 @@ export default function NodePopupMenu({
     return null
   }
 
-  // Handle menu resize
+  // Handle menu resize (horizontal + vertical from bottom-right corner)
   const onMenuResizeMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault()
     event.stopPropagation()
 
+    const startX = event.clientX
     const startY = event.clientY
-    const { height } = menuSize
+    const { width, height } = menuSize
     const startTop = position?.y || 0
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaY = moveEvent.clientY - startY
-      // Calculate minimum height based on header + minimum content
-      // Header is ~40px, minimum content should be ~60px
-      const minHeight = 100
-      let nextHeight = Math.max(minHeight, height + deltaY)
+    isResizingRef.current = true
 
-      // Constrain height to viewport
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX
+      const deltaY = moveEvent.clientY - startY
+
+      // Minimums: keep height reasonable and width not too small
+      const minHeight = 100 // header + some content
+      const minWidth = 280  // slightly narrower than default width
+
+      let nextHeight = Math.max(minHeight, height + deltaY)
+      let nextWidth = Math.max(minWidth, width + deltaX)
+
+      // Constrain size to viewport (don't allow going outside)
+      const viewportWidth = window.innerWidth
       const viewportHeight = window.innerHeight
       const margin = 10
-      const maxHeight = viewportHeight - startTop - margin
-      nextHeight = Math.min(nextHeight, maxHeight)
+      // For flow config, allow width to go fully to the right edge (no horizontal margin)
+      const horizontalMargin = isFlowConfig ? 0 : margin
 
-      setMenuSize({ width: menuSize.width, height: nextHeight })
+      const maxHeight = viewportHeight - startTop - margin
+      const maxWidth = viewportWidth - (position?.x || 0) - horizontalMargin
+
+      nextHeight = Math.min(nextHeight, maxHeight)
+      nextWidth = Math.min(nextWidth, maxWidth)
+
+      setMenuSize({ width: nextWidth, height: nextHeight })
     }
 
     const handleMouseUp = () => {
+      // Mark resize as just ended so the next outside click doesn't immediately close the menu
+      isResizingRef.current = false
+      resizeJustEndedRef.current = true
+      setTimeout(() => {
+        resizeJustEndedRef.current = false
+      }, 150)
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
@@ -824,6 +876,39 @@ export default function NodePopupMenu({
                 fontSize: '0.875rem',
                 fontWeight: 500
               }}>
+                Name
+              </label>
+              <input
+                type="text"
+                value={metadata.name}
+                onChange={(e) => {
+                  const updated = { ...metadata, name: e.target.value }
+                  setMetadata(updated)
+                  if (onFlowMetadataUpdate) {
+                    onFlowMetadataUpdate(updated)
+                  }
+                }}
+                placeholder="Enter flow name..."
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid rgba(148, 163, 184, 0.7)',
+                  borderRadius: '4px',
+                  background: 'rgba(15, 23, 42, 0.9)',
+                  color: '#e5e7eb',
+                  fontSize: '0.875rem',
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '0.5rem',
+                color: 'rgba(226, 232, 240, 0.9)',
+                fontSize: '0.875rem',
+                fontWeight: 500
+              }}>
                 Description
               </label>
               <textarea
@@ -859,29 +944,35 @@ export default function NodePopupMenu({
                 fontSize: '0.875rem',
                 fontWeight: 500
               }}>
-                User Initial Timeout (ms)
+                Language
               </label>
-              <input
-                type="number"
-                value={metadata.userInitialTimeout}
+              <select
+                value={metadata.language}
                 onChange={(e) => {
-                  const updated = { ...metadata, userInitialTimeout: parseFloat(e.target.value) || 0 }
+                  const updated = { ...metadata, language: e.target.value }
                   setMetadata(updated)
                   if (onFlowMetadataUpdate) {
                     onFlowMetadataUpdate(updated)
                   }
                 }}
-                min="0"
-                step="100"
                 style={{
                   width: '100%',
-                  padding: '0.5rem',
+                  padding: '0.5rem 1.75rem 0.5rem 0.5rem',
                   border: '1px solid rgba(148, 163, 184, 0.7)',
                   borderRadius: '4px',
                   background: 'rgba(15, 23, 42, 0.9)',
                   color: '#e5e7eb',
+                  fontSize: '0.875rem',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  MozAppearance: 'none',
                 }}
-              />
+              >
+                <option value="">Select language…</option>
+                <option value="cs">cs</option>
+                <option value="en">en</option>
+                <option value="de">de</option>
+              </select>
             </div>
 
             <div style={{ marginBottom: '1rem' }}>
@@ -892,17 +983,19 @@ export default function NodePopupMenu({
                 fontSize: '0.875rem',
                 fontWeight: 500
               }}>
-                Voice
+                MChannels Bot ID
               </label>
-              <select
-                value={metadata.voice}
+              <input
+                type="text"
+                value={metadata.mchannels_bot_id}
                 onChange={(e) => {
-                  const updated = { ...metadata, voice: e.target.value }
+                  const updated = { ...metadata, mchannels_bot_id: e.target.value }
                   setMetadata(updated)
                   if (onFlowMetadataUpdate) {
                     onFlowMetadataUpdate(updated)
                   }
                 }}
+                placeholder="Enter mchannels bot ID..."
                 style={{
                   width: '100%',
                   padding: '0.5rem',
@@ -910,15 +1003,313 @@ export default function NodePopupMenu({
                   borderRadius: '4px',
                   background: 'rgba(15, 23, 42, 0.9)',
                   color: '#e5e7eb',
+                  fontSize: '0.875rem',
                 }}
-              >
-                {PLACEHOLDER_VOICES.map((voice) => (
-                  <option key={voice} value={voice}>
-                    {voice}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
+
+            {/* Omnichannel config – voice, TTS, STT as individual fields */}
+            {(() => {
+              const omni = metadata.omnichannel_config || {}
+              const voice = omni.voice || {}
+              const tts = voice.tts || {}
+              const prosody = tts.prosody || {}
+              const stt = voice.stt || {}
+
+              const updateOmnichannel = (updater: (current: any) => any) => {
+                const current = metadata.omnichannel_config || {}
+                const updatedOmni = updater(current)
+                const updated = { ...metadata, omnichannel_config: updatedOmni }
+                setMetadata(updated)
+                if (onFlowMetadataUpdate) {
+                  onFlowMetadataUpdate(updated)
+                }
+              }
+
+              return (
+                <>
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '0.5rem',
+                      color: 'rgba(226, 232, 240, 0.9)',
+                      fontSize: '0.875rem',
+                      fontWeight: 500
+                    }}>
+                      Voice initial user response timeout
+                    </label>
+                    <input
+                      type="number"
+                      step={100}
+                      value={voice.initial_user_response_timeout ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value === '' ? '' : Number(e.target.value)
+                        updateOmnichannel((current) => {
+                          const v = current.voice || {}
+                          return {
+                            ...current,
+                            voice: {
+                              ...v,
+                              initial_user_response_timeout: value,
+                            },
+                          }
+                        })
+                      }}
+                      placeholder="e.g. 1800"
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem',
+                        border: '1px solid rgba(148, 163, 184, 0.7)',
+                        borderRadius: '4px',
+                        background: 'rgba(15, 23, 42, 0.9)',
+                        color: '#e5e7eb',
+                        fontSize: '0.875rem',
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '0.5rem',
+                      color: 'rgba(226, 232, 240, 0.9)',
+                      fontSize: '0.875rem',
+                      fontWeight: 500
+                    }}>
+                      Voice inactivity timeout
+                    </label>
+                    <input
+                      type="number"
+                      step={100}
+                      value={voice.inactivity_timeout ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value === '' ? '' : Number(e.target.value)
+                        updateOmnichannel((current) => {
+                          const v = current.voice || {}
+                          return {
+                            ...current,
+                            voice: {
+                              ...v,
+                              inactivity_timeout: value,
+                            },
+                          }
+                        })
+                      }}
+                      placeholder="e.g. 4000"
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem',
+                        border: '1px solid rgba(148, 163, 184, 0.7)',
+                        borderRadius: '4px',
+                        background: 'rgba(15, 23, 42, 0.9)',
+                        color: '#e5e7eb',
+                        fontSize: '0.875rem',
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '0.5rem',
+                      color: 'rgba(226, 232, 240, 0.9)',
+                      fontSize: '0.875rem',
+                      fontWeight: 500
+                    }}>
+                      TTS voice
+                    </label>
+                    <select
+                      value={tts.voice ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        updateOmnichannel((current) => {
+                          const v = current.voice || {}
+                          const t = v.tts || {}
+                          return {
+                            ...current,
+                            voice: {
+                              ...v,
+                              tts: {
+                                ...t,
+                                voice: value,
+                              },
+                            },
+                          }
+                        })
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem 1.75rem 0.5rem 0.5rem',
+                        border: '1px solid rgba(148, 163, 184, 0.7)',
+                        borderRadius: '4px',
+                        background: 'rgba(15, 23, 42, 0.9)',
+                        color: '#e5e7eb',
+                        fontSize: '0.875rem',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none',
+                      }}
+                    >
+                      <option value="">Select TTS voice…</option>
+                      <option value="cs-CZ_TomasU8">cs-CZ_TomasU8</option>
+                      <option value="cs-CZ_JanaU8">cs-CZ_JanaU8</option>
+                      <option value="en-US_Alloy">en-US_Alloy</option>
+                    </select>
+                  </div>
+
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '0.5rem',
+                      color: 'rgba(226, 232, 240, 0.9)',
+                      fontSize: '0.875rem',
+                      fontWeight: 500
+                    }}>
+                      TTS provider
+                    </label>
+                    <select
+                      value={tts.provider ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        updateOmnichannel((current) => {
+                          const v = current.voice || {}
+                          const t = v.tts || {}
+                          return {
+                            ...current,
+                            voice: {
+                              ...v,
+                              tts: {
+                                ...t,
+                                provider: value,
+                              },
+                            },
+                          }
+                        })
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem 1.75rem 0.5rem 0.5rem',
+                        border: '1px solid rgba(148, 163, 184, 0.7)',
+                        borderRadius: '4px',
+                        background: 'rgba(15, 23, 42, 0.9)',
+                        color: '#e5e7eb',
+                        fontSize: '0.875rem',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none',
+                      }}
+                    >
+                      <option value="">Select TTS provider…</option>
+                      <option value="mvoice">mvoice</option>
+                      <option value="azure">azure</option>
+                    </select>
+                  </div>
+
+                  <div style={{ marginBottom: '1.5rem' }}>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '0.5rem',
+                      color: 'rgba(226, 232, 240, 0.9)',
+                      fontSize: '0.875rem',
+                      fontWeight: 500
+                    }}>
+                      TTS prosody rate
+                    </label>
+                    {(() => {
+                      const rawRate = typeof prosody.rate === 'string' ? prosody.rate : '100%'
+                      const match = rawRate.match(/(\d+)/)
+                      const rateNumber = match ? Number(match[1]) : 100
+                      const clamped = Math.min(150, Math.max(50, rateNumber || 100))
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <input
+                            type="range"
+                            min={50}
+                            max={150}
+                            step={5}
+                            value={clamped}
+                            onChange={(e) => {
+                              const value = Number(e.target.value)
+                              const rateString = `${value}%`
+                              updateOmnichannel((current) => {
+                                const v = current.voice || {}
+                                const t = v.tts || {}
+                                const p = t.prosody || {}
+                                return {
+                                  ...current,
+                                  voice: {
+                                    ...v,
+                                    tts: {
+                                      ...t,
+                                      prosody: {
+                                        ...p,
+                                        rate: rateString,
+                                      },
+                                    },
+                                  },
+                                }
+                              })
+                            }}
+                            style={{ flex: 1 }}
+                          />
+                          <span style={{ minWidth: '3rem', textAlign: 'right', fontSize: '0.8rem', color: '#e5e7eb' }}>
+                            {clamped}%
+                          </span>
+                        </div>
+                      )
+                    })()}
+                  </div>
+
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '0.5rem',
+                      color: 'rgba(226, 232, 240, 0.9)',
+                      fontSize: '0.875rem',
+                      fontWeight: 500
+                    }}>
+                      STT provider
+                    </label>
+                    <select
+                      value={stt.provider ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        updateOmnichannel((current) => {
+                          const v = current.voice || {}
+                          const s = v.stt || {}
+                          return {
+                            ...current,
+                            voice: {
+                              ...v,
+                              stt: {
+                                ...s,
+                                provider: value,
+                              },
+                            },
+                          }
+                        })
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem 1.75rem 0.5rem 0.5rem',
+                        border: '1px solid rgba(148, 163, 184, 0.7)',
+                        borderRadius: '4px',
+                        background: 'rgba(15, 23, 42, 0.9)',
+                        color: '#e5e7eb',
+                        fontSize: '0.875rem',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none',
+                      }}
+                    >
+                      <option value="">Select STT provider…</option>
+                      <option value="azure">azure</option>
+                      <option value="mvoice">mvoice</option>
+                    </select>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         )}
 
@@ -1095,8 +1486,8 @@ export default function NodePopupMenu({
             </div>
           )}
 
-        {/* Fallback for nodes without module */}
-        {!module && (
+        {/* Fallback for nodes without module (only for node config, not flow config) */}
+        {!isFlowConfig && !module && (
           <p style={{ padding: '0.75rem', color: 'rgba(148, 163, 184, 0.8)', fontSize: '0.875rem' }}>
             No module configuration found
           </p>

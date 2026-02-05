@@ -9,6 +9,7 @@ import { getNodeLabel } from './utils/nodeUtils'
 import { useValidation } from './hooks/useValidation'
 import { getBranchingLayoutConstants, calculateOutputNodePosition, repositionOutputNodes } from './utils/branchingNodeHelpers'
 import { exportFlowToJson } from './utils/exportHelpers'
+import { translateReactFlowToCustom, type CustomFlowMetadata } from './utils/translationHelpers'
 import { getDefaultValueForParamType } from './utils/branchingNodeOperations'
 
 import Toolbar from './components/Toolbar'
@@ -16,6 +17,7 @@ import FlowCanvas from './components/FlowCanvas'
 import Minimap from './Minimap'
 import NodePopupMenu from './components/NodePopupMenu'
 import ValidationBanner from './components/ValidationBanner'
+import JsonEditor from './components/JsonEditor'
 import { useConnectionHandlers } from './hooks/useConnectionHandlers'
 
 const initialNodes: Node[] = []
@@ -33,14 +35,18 @@ function App() {
   const [flowConfigMenuPosition, setFlowConfigMenuPosition] = useState<{ x: number; y: number } | null>(null)
   const [flowMetadata, setFlowMetadata] = useState({
     description: '',
-    userInitialTimeout: 0,
-    voice: 'Voice 1',
+    language: '',
+    mchannels_bot_id: '',
+    name: '',
+    omnichannel_config: {} as Record<string, any>,
+    stickers: {} as Record<string, any>,
   })
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [validationStatus, setValidationStatus] = useState<{ isValid: boolean | null; message: string }>({
     isValid: null,
     message: '',
   })
+  const [isJsonEditorOpen, setIsJsonEditorOpen] = useState(false)
 
   // Track when a branching node is being dragged so we can disable
   // smooth transitions for its output nodes (prevents them from lagging)
@@ -342,11 +348,18 @@ function App() {
           }, highestZIndexRef.current)
           const baseZIndex = maxZIndex + 1
           highestZIndexRef.current = baseZIndex + outputCount
+
+          // Deselect all existing nodes
+          const clearedNodes = nds.map((node) => ({ ...node, selected: false }))
+
+          // Apply z-index and select only the main branching node (first in array)
           const nodesWithZIndex = nodesToAdd.map((node, idx) => ({
             ...node,
             zIndex: baseZIndex + idx,
+            selected: idx === 0,
           }))
-          return nds.concat(nodesWithZIndex)
+
+          return clearedNodes.concat(nodesWithZIndex)
         } else {
           // Single node (or any other non-branching type)
           const newNode = createNodeFromConfig(module.type as NodeType, finalPosition, {
@@ -360,7 +373,9 @@ function App() {
           }, highestZIndexRef.current)
           const newZIndex = maxZIndex + 1
           highestZIndexRef.current = newZIndex
-          return nds.concat({ ...newNode, zIndex: newZIndex })
+          // Deselect all existing nodes and select the newly added one
+          const clearedNodes = nds.map((node) => ({ ...node, selected: false }))
+          return clearedNodes.concat({ ...newNode, zIndex: newZIndex, selected: true })
         }
 
         // Return unchanged if no module found
@@ -970,8 +985,12 @@ function App() {
     setFlowConfigMenuPosition(null)
   }, [])
 
-  const handleFlowMetadataUpdate = useCallback((metadata: { description: string; userInitialTimeout: number; voice: string }) => {
-    setFlowMetadata(metadata)
+  const handleFlowMetadataUpdate = useCallback((metadata: CustomFlowMetadata) => {
+    setFlowMetadata({
+      ...metadata,
+      omnichannel_config: metadata.omnichannel_config || {},
+      stickers: metadata.stickers || {},
+    })
   }, [])
 
   const handleMenuPositionChange = useCallback((position: { x: number; y: number } | null) => {
@@ -1168,23 +1187,6 @@ function App() {
     }
   }, [isLocked, saveHistoryBeforeChange, setNodes, setEdges, openMenuNodeId, nodes])
 
-  const handleExportJson = useCallback(() => {
-    if (!reactFlowInstance) {
-      console.warn('ReactFlow instance not available')
-      return
-    }
-
-    const exportData = exportFlowToJson(nodes, edges)
-    console.log('Export JSON:', JSON.stringify(exportData, null, 2))
-
-    // Also copy to clipboard
-    navigator.clipboard.writeText(JSON.stringify(exportData, null, 2)).then(() => {
-      console.log('JSON copied to clipboard')
-    }).catch((err) => {
-      console.error('Failed to copy to clipboard:', err)
-    })
-  }, [reactFlowInstance, nodes, edges])
-
   const { validate } = useValidation(nodes, edges)
 
   const handleValidate = useCallback(() => {
@@ -1195,6 +1197,52 @@ function App() {
   const handleDismissValidation = useCallback(() => {
     setValidationStatus({ isValid: null, message: '' })
   }, [])
+
+  const handleOpenJsonEditor = useCallback(() => {
+    // Allow opening JSON editor even when there are no nodes,
+    // so the user can paste/import a flow at any time.
+    setIsJsonEditorOpen(true)
+  }, [])
+
+  const handleCloseJsonEditor = useCallback(() => {
+    setIsJsonEditorOpen(false)
+  }, [])
+
+  const handleSaveJsonEditor = useCallback((reactFlowData: { nodes: any[]; edges: any[] }, metadata: CustomFlowMetadata) => {
+    // Save history before applying changes
+    saveHistoryBeforeChange()
+
+    // Update flow metadata
+    setFlowMetadata({
+      ...metadata,
+      omnichannel_config: metadata.omnichannel_config || {},
+      stickers: metadata.stickers || {},
+    })
+
+    // Update nodes and edges
+    // We need to properly reconstruct nodes with all their properties
+    setNodes(reactFlowData.nodes.map((node) => {
+      // Find the original node to preserve additional properties
+      const originalNode = nodes.find((n) => n.id === node.id)
+      return {
+        ...node,
+        // Preserve style, zIndex, and other ReactFlow properties from original
+        style: originalNode?.style,
+        zIndex: originalNode?.zIndex,
+        selected: false,
+        // Ensure data has all required fields
+        data: {
+          ...node.data,
+          // Preserve connectingFrom if it exists
+          connectingFrom: originalNode?.data?.connectingFrom || null,
+        },
+      } as Node
+    }))
+
+    setEdges(reactFlowData.edges)
+
+    setIsJsonEditorOpen(false)
+  }, [nodes, setNodes, setEdges, saveHistoryBeforeChange])
 
   // Flag to prevent saving history during undo/redo operations
   const isRestoringStateRef = useRef(false)
@@ -1550,7 +1598,6 @@ function App() {
           showMinimap={showMinimap}
           onMinimapToggle={() => setShowMinimap((prev) => !prev)}
           hasNodes={nodes.length > 0}
-          onExportJson={handleExportJson}
           onValidate={handleValidate}
           onUndo={handleUndo}
           onRedo={handleRedo}
@@ -1558,6 +1605,7 @@ function App() {
           canRedo={history.canRedo}
           toolbarRef={toolbarRef}
           onOpenFlowConfigMenu={handleOpenFlowConfigMenu}
+          onOpenJsonEditor={handleOpenJsonEditor}
         />
 
         <FlowCanvas
@@ -1633,6 +1681,27 @@ function App() {
           message={validationStatus.message}
           onDismiss={handleDismissValidation}
         />
+
+        {isJsonEditorOpen && (() => {
+          const reactFlowData = exportFlowToJson(nodes, edges)
+          const customMetadata: CustomFlowMetadata = {
+            description: flowMetadata.description,
+            language: flowMetadata.language,
+            mchannels_bot_id: flowMetadata.mchannels_bot_id,
+            name: flowMetadata.name,
+            omnichannel_config: flowMetadata.omnichannel_config || {},
+            stickers: flowMetadata.stickers || {},
+          }
+          const customData = translateReactFlowToCustom(reactFlowData, customMetadata)
+
+          return (
+            <JsonEditor
+              initialJson={customData}
+              onClose={handleCloseJsonEditor}
+              onSave={handleSaveJsonEditor}
+            />
+          )
+        })()}
       </main>
     </div>
   )

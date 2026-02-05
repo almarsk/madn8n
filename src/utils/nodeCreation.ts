@@ -2,6 +2,7 @@ import { type Node } from 'reactflow'
 import nodeConfigs, { type NodeType, NODE_TYPES } from '../nodeConfigs'
 import modules from '../modules'
 import { parseType, getNodeLabel, getId } from './nodeUtils'
+import { getBranchingLayoutConstants, calculateOutputNodePosition } from './branchingNodeHelpers'
 
 // ReactFlow component type - all nodes use the NodeFactory component
 export const REACTFLOW_NODE_TYPE = 'nodeFactory'
@@ -111,9 +112,10 @@ export const createBranchingNodeWithOutputs = (
   const outputSpacing = branchingConfig.outputSpacing || 10
   const outputNodeWidth = branchingConfig.outputNodeWidth || 220
   const outputNodeHeight = branchingConfig.outputNodeHeight || 60
-  // Extra spacing for the first output to avoid crossing the header border line
-  // This should match the value in getBranchingLayoutConstants
-  const firstOutputExtraSpacing = 20
+  // Extra spacing for the first output to avoid crossing the header border line.
+  // This MUST match the value used in getBranchingLayoutConstants to keep
+  // initial spacing consistent with subsequent reflows.
+  const firstOutputExtraSpacing = getBranchingLayoutConstants().firstOutputExtraSpacing
 
   // Calculate branching node size based on output count
   // Use the standard output node width (all nodes should be same width)
@@ -147,6 +149,10 @@ export const createBranchingNodeWithOutputs = (
   }
 
   const outputNodes: Node[] = []
+
+  // Use the same layout constants and helper that branchingNodeHelpers uses so
+  // that initial creation and later repositioning are perfectly aligned.
+  const layoutConstants = getBranchingLayoutConstants()
 
   for (let i = 0; i < outputCount; i++) {
     let outputParams: Record<string, any> = {}
@@ -189,13 +195,12 @@ export const createBranchingNodeWithOutputs = (
 
     // Use the same spacing calculation as in branchingNodeHelpers for consistency
     const firstOutputExtraSpacing = i === 0 ? 20 : 0
+    const outputPosition = calculateOutputNodePosition(position, i, layoutConstants)
+
     const outputNode: Node = {
       id: getId(),
       type: REACTFLOW_NODE_TYPE,
-      position: {
-        x: position.x + padding,
-        y: position.y + headerHeight + outputSpacing + firstOutputExtraSpacing + i * (outputNodeHeight + outputSpacing),
-      },
+      position: outputPosition,
       data: outputNodeData,
       style: {
         width: outputNodeWidth,
