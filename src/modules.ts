@@ -43,9 +43,41 @@ export interface Module {
         path?: string
         unpack_params?: boolean
     }
+    // Whether this module should appear in the toolbar (default: true)
+    showInToolbar?: boolean
+    // Whether this module's nodes should show the menu icon (default: true)
+    showMenu?: boolean
 }
 
-const modules: Module[] = [
+// Default modules - these are always available
+// Order: Type1, Branching, Branching2, Sticker, End, ... rest
+const defaultModules: Module[] = [
+    {
+        "name": "Type 1",
+        "type": "single",
+        "description": "Module 1 description",
+        "params": [
+            {
+                "name": "what",
+                "type": "str"
+            },
+            {
+                "name": "how",
+                "type": "int"
+            },
+            {
+                "name": "why",
+                "type": "bool"
+            }
+        ],
+        "labelParam": "what",
+        "handlers": ["node_exit"],
+        "source": {
+            "path": "",
+            "unpack_params": true
+        },
+        "documentation": "Placeholder documentation for Type 1 module"
+    },
     {
         "name": "Branching",
         "type": "branchingListParam",
@@ -88,30 +120,34 @@ const modules: Module[] = [
         "documentation": "Placeholder documentation for Branching2 module"
     },
     {
-        "name": "Type 1",
-        "type": "single",
-        "description": "Module 1 description",
+        "name": "StickerModule",
+        "type": "sticker",
+        "description": "Sticker node for visual organization",
         "params": [
             {
-                "name": "what",
-                "type": "str"
-            },
-            {
-                "name": "how",
-                "type": "int"
-            },
-            {
-                "name": "why",
-                "type": "bool"
+                "name": "stickers",
+                "type": "list[str]",
+                "obligatory": true
             }
         ],
-        "labelParam": "what",
+        "labelParam": undefined, // Will be computed from stickers array
         "handlers": ["node_exit"],
         "source": {
             "path": "",
             "unpack_params": true
         },
-        "documentation": "Placeholder documentation for Type 1 module"
+        "documentation": "Sticker node for visual organization with color coding"
+    },
+    {
+        "name": "End",
+        "type": "inputOnly",
+        "description": "End node - exit point of the flow",
+        "params": [],
+        "source": {
+            "path": "",
+            "unpack_params": true
+        },
+        "documentation": "End node marks the end of the flow"
     },
     {
         "name": "Type 2",
@@ -148,7 +184,52 @@ const modules: Module[] = [
             "unpack_params": true
         },
         "documentation": "Placeholder documentation for Type Q module"
+    },
+    {
+        "name": "Start",
+        "type": "outputOnly",
+        "description": "Start node - entry point of the flow",
+        "params": [],
+        "handlers": ["node_exit"],
+        "source": {
+            "path": "",
+            "unpack_params": true
+        },
+        "showInToolbar": false, // Start node should not appear in toolbar
+        "showMenu": false, // Start node should not show menu icon
+        "documentation": "Start node marks the beginning of the flow"
     }
 ]
 
+// Dynamically loaded modules (will be populated by downloadModules)
+let dynamicModules: Module[] = []
+
+// Combined modules list - this will be updated when dynamic modules are loaded
+let modules: Module[] = [...defaultModules]
+
+/**
+ * Download additional modules from server (placeholder for future implementation)
+ * @param mchannelsBotId - The mchannels bot ID to fetch modules for
+ */
+export async function downloadModules(mchannelsBotId: string): Promise<Module[]> {
+    // TODO: Implement actual API call to fetch modules
+    // For now, return empty array
+    // Example:
+    // const response = await fetch(`/api/modules?bot_id=${mchannelsBotId}`)
+    // const data = await response.json()
+    // return data.modules as Module[]
+
+    console.log('downloadModules called with mchannels_bot_id:', mchannelsBotId)
+    return []
+}
+
+/**
+ * Add dynamically loaded modules to the modules list
+ */
+export function addDynamicModules(newModules: Module[]): void {
+    dynamicModules = [...newModules]
+    modules = [...defaultModules, ...dynamicModules]
+}
+
+// Export the modules array (will be updated by addDynamicModules)
 export default modules

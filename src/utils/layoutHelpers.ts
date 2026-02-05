@@ -11,6 +11,11 @@ import { getBranchingLayoutConstants, repositionOutputNodes } from './branchingN
  * - Assign horizontal "levels" based on distance from root.
  * - Within each level, vertically center nodes and space them evenly.
  * - After module positions are set, use branching helpers to reposition output nodes.
+ * 
+ * Performance optimizations:
+ * - Use Maps for O(1) lookups
+ * - Limit BFS iterations
+ * - Batch node updates
  */
 export function autoLayout(
   nodes: Node[],
@@ -19,14 +24,47 @@ export function autoLayout(
 ): Node[] {
   if (nodes.length === 0) return nodes
 
+  // Check if nodes are already well-positioned (not all at origin or very close together)
+  // If so, preserve more of their relative positions
+  const isWellPositioned = (() => {
+    if (nodes.length <= 1) return false
+    
+    const positions = nodes
+      .filter(n => {
+        const nodeType = n.data?.nodeType as NodeType | undefined
+        return !isBranchingOutputNodeType(nodeType)
+      })
+      .map(n => n.position)
+    
+    if (positions.length === 0) return false
+    
+    // Calculate spread of positions
+    const xs = positions.map(p => p.x)
+    const ys = positions.map(p => p.y)
+    const minX = Math.min(...xs)
+    const maxX = Math.max(...xs)
+    const minY = Math.min(...ys)
+    const maxY = Math.max(...ys)
+    
+    const spreadX = maxX - minX
+    const spreadY = maxY - minY
+    
+    // Consider well-positioned if nodes are spread out (not all at origin or clustered)
+    // Threshold: at least 200px spread in either direction
+    return spreadX > 200 || spreadY > 200
+  })()
+
   const nodeById = new Map<string, Node>()
   nodes.forEach((n) => nodeById.set(n.id, n))
 
-  // 1) Identify module ids (exclude branching output nodes)
+  // 1) Identify module ids (exclude branching output nodes and Start node)
   const moduleIds = new Set<string>()
+  const startNode = nodes.find((n) => n.data?.moduleName === 'Start')
   for (const node of nodes) {
     const nodeType = node.data?.nodeType as NodeType | undefined
     if (nodeType && isBranchingOutputNodeType(nodeType)) continue
+    // Exclude Start node from module layout - it will be positioned separately
+    if (node.id === startNode?.id) continue
     moduleIds.add(node.id)
   }
 
@@ -36,6 +74,7 @@ export function autoLayout(
   }
 
   // 2) Build module-level edges (collapse branching outputs to their parent)
+  // Exclude Start node edges from level calculation - Start node is positioned separately
   type ModuleEdge = { from: string; to: string }
   const moduleEdges: ModuleEdge[] = []
   const incomingCount = new Map<string, number>()
@@ -45,6 +84,9 @@ export function autoLayout(
     const sourceNode = nodeById.get(edge.source)
     const targetNode = nodeById.get(edge.target)
     if (!sourceNode || !targetNode) continue
+
+    // Skip edges from Start node - it's positioned separately
+    if (sourceNode.data?.moduleName === 'Start') continue
 
     const sourceType = sourceNode.data?.nodeType as NodeType | undefined
     const targetType = targetNode.data?.nodeType as NodeType | undefined
@@ -88,23 +130,33 @@ export function autoLayout(
   }
 
   // 4) Compute levels via BFS from root; fall back to 0 for unreachable nodes
+  // Handle cycles by limiting how many times we can update a node's level
   const levelByModule = new Map<string, number>()
+  const levelUpdateCount = new Map<string, number>() // Track how many times each node's level was updated
 
   if (rootId) {
-    const queue: string[] = [rootId]
+    const queue: Array<{ id: string; level: number }> = [{ id: rootId, level: 0 }]
     levelByModule.set(rootId, 0)
+    levelUpdateCount.set(rootId, 1)
 
     while (queue.length > 0) {
-      const current = queue.shift()!
-      const currentLevel = levelByModule.get(current) ?? 0
+      const { id: current, level: currentLevel } = queue.shift()!
+      
       for (const e of moduleEdges) {
         if (e.from === current) {
           const next = e.to
           const existing = levelByModule.get(next)
           const nextLevel = currentLevel + 1
-          if (existing === undefined || nextLevel > existing) {
+          const updateCount = levelUpdateCount.get(next) || 0
+          
+          // Only update if:
+          // 1. First visit, OR
+          // 2. Longer path found AND we haven't updated this node too many times (prevents cycle loops)
+          const MAX_UPDATES = 10 // Prevent infinite updates from cycles
+          if (existing === undefined || (nextLevel > existing && updateCount < MAX_UPDATES)) {
             levelByModule.set(next, nextLevel)
-            queue.push(next)
+            levelUpdateCount.set(next, updateCount + 1)
+            queue.push({ id: next, level: nextLevel })
           }
         }
       }
@@ -118,73 +170,342 @@ export function autoLayout(
     }
   })
 
-  // 5) Group by level and compute positions
-  // For nodes at the same level, order them by their incoming edge's source output index
-  // to prevent edge crossings
+  // 5) Group by level and compute positions in a grid pattern
+  // For nodes at the same level, arrange them in a grid (multiple rows)
+  // Nodes with multiple inputs are positioned based on their source positions
   const groups = new Map<number, string[]>()
   levelByModule.forEach((level, id) => {
     if (!groups.has(level)) groups.set(level, [])
     groups.get(level)!.push(id)
   })
 
-  const LEVEL_X_SPACING = 380
-  const NODE_Y_SPACING = 150
+  const LEVEL_X_SPACING = 350 // Horizontal spacing between levels (reduced to minimize long connections)
+  const NODE_Y_SPACING = 180 // Vertical spacing between nodes in same level
+  const NODE_X_SPACING = 250 // Horizontal spacing between nodes in same level (reduced)
+  
+  // Calculate optimal grid dimensions based on node count
+  // Use a square-ish grid that grows organically
+  const calculateGridDimensions = (nodeCount: number): { cols: number; rows: number } => {
+    if (nodeCount === 0) return { cols: 0, rows: 0 }
+    if (nodeCount === 1) return { cols: 1, rows: 1 }
+    
+    // Aim for roughly square grids, but allow some flexibility
+    // For small counts, use compact grids
+    if (nodeCount <= 4) {
+      return { cols: Math.ceil(Math.sqrt(nodeCount)), rows: Math.ceil(nodeCount / Math.ceil(Math.sqrt(nodeCount))) }
+    }
+    
+    // For larger counts, use a more rectangular grid that grows organically
+    // Try to keep aspect ratio reasonable (not too wide, not too tall)
+    const cols = Math.ceil(Math.sqrt(nodeCount * 1.2)) // Slightly wider than square
+    const rows = Math.ceil(nodeCount / cols)
+    return { cols, rows }
+  }
+
+  // Calculate offset to position at 2/3 top-right of viewport
+  // Assuming viewport is roughly 1920x1080, we want nodes at 2/3 right (1280px) and 2/3 down from top (720px)
+  const VIEWPORT_OFFSET_X = 1280 // 2/3 of typical viewport width (1920 * 2/3)
+  const VIEWPORT_OFFSET_Y = 720 // 2/3 down from top (1080 * 2/3)
 
   const positions = new Map<string, { x: number; y: number }>()
 
-  // Build a map of target -> source output index for ordering
-  const targetToSourceOutputIndex = new Map<string, number>()
+  // Build maps for positioning nodes based on their inputs
+  // Track handle positions: 'top', 'bottom', 'left', 'right', or undefined (default)
+  const incomingEdges = new Map<string, Array<{ sourceId: string; outputIndex: number; sourceHandle?: string; targetHandle?: string }>>()
   for (const edge of edges) {
     const sourceNode = nodeById.get(edge.source)
-    if (!sourceNode) continue
-    
+    const targetNode = nodeById.get(edge.target)
+    if (!sourceNode || !targetNode) continue
+
     const sourceType = sourceNode.data?.nodeType as NodeType | undefined
+    const targetType = targetNode.data?.nodeType as NodeType | undefined
+
+    // Get the actual module IDs (collapse output nodes to parents)
+    let sourceModuleId = sourceNode.id
+    let targetModuleId = targetNode.id
+
     if (sourceType && isBranchingOutputNodeType(sourceType)) {
-      const outputIndex = typeof sourceNode.data?.outputIndex === 'number' 
-        ? sourceNode.data.outputIndex 
-        : 0
-      const targetId = edge.target
-      // If target is an output node, map to its parent
-      const targetNode = nodeById.get(targetId)
-      const targetType = targetNode?.data?.nodeType as NodeType | undefined
-      const finalTargetId = targetType && isBranchingOutputNodeType(targetType)
-        ? (targetNode.data?.parentNodeId as string | undefined) || targetId
-        : targetId
-      
-      // Only set if not already set or if this output index is lower (prefer first output)
-      if (!targetToSourceOutputIndex.has(finalTargetId) || 
-          (targetToSourceOutputIndex.get(finalTargetId)! > outputIndex)) {
-        targetToSourceOutputIndex.set(finalTargetId, outputIndex)
+      const parentId = sourceNode.data?.parentNodeId as string | undefined
+      if (parentId && moduleIds.has(parentId)) {
+        sourceModuleId = parentId
       }
     }
+
+    if (targetType && isBranchingOutputNodeType(targetType)) {
+      const parentId = targetNode.data?.parentNodeId as string | undefined
+      if (parentId && moduleIds.has(parentId)) {
+        targetModuleId = parentId
+      }
+    }
+
+    if (!moduleIds.has(sourceModuleId) || !moduleIds.has(targetModuleId)) continue
+    if (sourceModuleId === targetModuleId) continue
+
+    // Track incoming edges for each target module
+    const outputIndex = sourceType && isBranchingOutputNodeType(sourceType)
+      ? (typeof sourceNode.data?.outputIndex === 'number' ? sourceNode.data.outputIndex : 0)
+      : 0
+
+    if (!incomingEdges.has(targetModuleId)) {
+      incomingEdges.set(targetModuleId, [])
+    }
+    incomingEdges.get(targetModuleId)!.push({ 
+      sourceId: sourceModuleId, 
+      outputIndex,
+      sourceHandle: edge.sourceHandle || undefined,
+      targetHandle: edge.targetHandle || undefined,
+    })
   }
 
+  // Process levels in order, positioning nodes based on their inputs
   const sortedLevels = Array.from(groups.keys()).sort((a, b) => a - b)
+  
   for (const level of sortedLevels) {
     let ids = groups.get(level) || []
     
-    // Sort by source output index if available, then by id for stability
+    // Sort nodes: prioritize nodes with inputs from previous levels
+    // For nodes with multiple inputs, we'll position them based on average source Y position
     ids.sort((a, b) => {
-      const aIndex = targetToSourceOutputIndex.get(a) ?? Infinity
-      const bIndex = targetToSourceOutputIndex.get(b) ?? Infinity
-      if (aIndex !== bIndex) {
-        return aIndex - bIndex
+      const aInputs = incomingEdges.get(a) || []
+      const bInputs = incomingEdges.get(b) || []
+      
+      // Nodes with inputs from previous levels come first
+      const aHasInputs = aInputs.length > 0
+      const bHasInputs = bInputs.length > 0
+      if (aHasInputs !== bHasInputs) {
+        return aHasInputs ? -1 : 1
       }
+      
+      // If both have inputs, sort by output index of first input
+      if (aHasInputs && bHasInputs) {
+        const aFirstIndex = aInputs[0]?.outputIndex ?? Infinity
+        const bFirstIndex = bInputs[0]?.outputIndex ?? Infinity
+        if (aFirstIndex !== bFirstIndex) {
+          return aFirstIndex - bFirstIndex
+        }
+      }
+      
       return a.localeCompare(b)
     })
     
+    // Arrange in grid: calculate positions with organic growth
     const count = ids.length
-    const totalHeight = (count - 1) * NODE_Y_SPACING
-    const startY = -totalHeight / 2
-    const x = level * LEVEL_X_SPACING
+    const { cols, rows } = calculateGridDimensions(count)
+    const baseX = VIEWPORT_OFFSET_X + level * LEVEL_X_SPACING
+    
+    // Calculate base Y position for this level (center the grid vertically)
+    const totalGridHeight = (rows - 1) * NODE_Y_SPACING
+    const baseY = VIEWPORT_OFFSET_Y - totalGridHeight / 2
+    
+    // Calculate grid width to center horizontally within the level
+    const totalGridWidth = (cols - 1) * NODE_X_SPACING
+    const gridStartX = baseX - totalGridWidth / 2
 
     ids.forEach((id, index) => {
-      const y = startY + index * NODE_Y_SPACING
+      const row = Math.floor(index / cols)
+      const col = index % cols
+      
+      // Default grid position
+      let x = gridStartX + col * NODE_X_SPACING
+      let y = baseY + row * NODE_Y_SPACING
+      
+      // If nodes are already well-positioned, try to preserve relative positions
+      if (isWellPositioned && level > 0) {
+        const originalNode = nodeById.get(id)
+        if (originalNode) {
+          // Calculate relative position within the level
+          const originalX = originalNode.position.x
+          const originalY = originalNode.position.y
+          
+          // Find min/max positions of nodes at this level in original layout
+          const levelNodes = Array.from(moduleIds)
+            .filter(moduleId => (levelByModule.get(moduleId) ?? 0) === level)
+            .map(moduleId => nodeById.get(moduleId))
+            .filter(n => n !== undefined) as Node[]
+          
+          if (levelNodes.length > 0) {
+            const levelXs = levelNodes.map(n => n.position.x)
+            const levelYs = levelNodes.map(n => n.position.y)
+            const levelMinX = Math.min(...levelXs)
+            const levelMaxX = Math.max(...levelXs)
+            const levelMinY = Math.min(...levelYs)
+            const levelMaxY = Math.max(...levelYs)
+            
+            const levelWidth = levelMaxX - levelMinX || 1
+            const levelHeight = levelMaxY - levelMinY || 1
+            
+            // Calculate relative position (0-1) in original layout
+            const relX = (originalX - levelMinX) / levelWidth
+            const relY = (originalY - levelMinY) / levelHeight
+            
+            // Map to new grid position, preserving relative order
+            const newGridWidth = (cols - 1) * NODE_X_SPACING
+            const newGridHeight = (rows - 1) * NODE_Y_SPACING
+            
+            // Blend: 60% preserve relative position, 40% use grid
+            const preservedX = gridStartX + relX * newGridWidth
+            const preservedY = baseY + relY * newGridHeight
+            x = x * 0.4 + preservedX * 0.6
+            y = y * 0.4 + preservedY * 0.6
+          }
+        }
+      }
+      
+      // For nodes with inputs, position them based on handle positions to minimize edge length
+      const inputs = incomingEdges.get(id) || []
+      if (inputs.length > 0 && level > 0) {
+        // Calculate average position of source nodes, considering handle positions
+        let totalSourceX = 0
+        let totalSourceY = 0
+        let validSources = 0
+        let handleOffsetY = 0 // Accumulated offset based on handle positions
+        
+        for (const input of inputs) {
+          const sourcePos = positions.get(input.sourceId)
+          if (sourcePos) {
+            totalSourceX += sourcePos.x
+            totalSourceY += sourcePos.y
+            validSources++
+            
+            // Adjust based on handle positions
+            // If source handle is 'bottom', target should be below (positive Y offset)
+            // If source handle is 'top', target should be above (negative Y offset)
+            // If target handle is 'top', target should be above source
+            // If target handle is 'bottom', target should be below source
+            if (input.sourceHandle === 'bottom' || input.targetHandle === 'top') {
+              handleOffsetY -= NODE_Y_SPACING * 0.3 // Position above
+            } else if (input.sourceHandle === 'top' || input.targetHandle === 'bottom') {
+              handleOffsetY += NODE_Y_SPACING * 0.3 // Position below
+            }
+          }
+        }
+        
+        if (validSources > 0) {
+          const avgSourceX = totalSourceX / validSources
+          const avgSourceY = totalSourceY / validSources
+          
+          // Position node closer to its sources - aim for a position that's:
+          // - At the correct level (x = baseX)
+          // - Aligned with sources (y = avgSourceY) + handle offset
+          // But keep it within grid bounds
+          const rowCenterY = baseY + row * NODE_Y_SPACING
+          const baseAdjustment = avgSourceY - rowCenterY
+          const handleAdjustedOffset = handleOffsetY / validSources // Average handle offset
+          const adjustmentRange = NODE_Y_SPACING * 0.6 // Allow 60% adjustment to get closer to sources
+          const totalAdjustment = baseAdjustment + handleAdjustedOffset
+          const yAdjustment = Math.max(-adjustmentRange, Math.min(adjustmentRange, totalAdjustment))
+          
+          // Position directly aligned with source to minimize edge length
+          y = rowCenterY + yAdjustment
+          
+          // For X, if we have a single source, we can position slightly closer
+          if (validSources === 1) {
+            // Position slightly to the left of the level to be closer to source
+            const sourceX = totalSourceX
+            const targetX = baseX
+            // If source is significantly to the left, we can move this node a bit left too
+            if (sourceX < targetX - LEVEL_X_SPACING * 0.3) {
+              x = Math.max(gridStartX, targetX - LEVEL_X_SPACING * 0.15)
+            }
+          }
+        }
+      }
+      
       positions.set(id, { x, y })
     })
   }
 
-  // 6) Apply positions to module nodes
+  // 6) Handle Start node positioning - place it to the left of root module
+  // Start node is excluded from level-based layout, so position it after root is positioned
+  if (startNode && rootId) {
+    const rootPos = positions.get(rootId)
+    if (rootPos) {
+      // Check if there are other nodes at the same Y level that might overlap
+      // Find the leftmost node at root's level to avoid overlap
+      const rootLevel = levelByModule.get(rootId) ?? 0
+      let minXAtRootLevel = rootPos.x
+      
+      for (const [id, pos] of positions.entries()) {
+        const nodeLevel = levelByModule.get(id) ?? 0
+        if (nodeLevel === rootLevel && id !== rootId) {
+          minXAtRootLevel = Math.min(minXAtRootLevel, pos.x)
+        }
+      }
+      
+      // Position Start node to the left, ensuring it doesn't overlap with other nodes
+      // Use closer spacing (70% of level spacing) and ensure it's to the left of any other nodes
+      const startX = Math.min(rootPos.x - LEVEL_X_SPACING * 0.7, minXAtRootLevel - NODE_X_SPACING * 1.5)
+      positions.set(startNode.id, {
+        x: startX,
+        y: rootPos.y,
+      })
+    }
+  }
+
+  // 7) Special handling for nodes that connect to branching nodes via output nodes
+  // Position them closer to the branching node's output connection point
+  // This handles both forward connections and cycles (nodes connecting back to branching nodes)
+  const nodesConnectingToBranching = new Map<string, { branchingId: string; outputIndex: number }>()
+  
+  for (const edge of edges) {
+    const sourceNode = nodeById.get(edge.source)
+    const targetNode = nodeById.get(edge.target)
+    if (!sourceNode || !targetNode) continue
+
+    const sourceType = sourceNode.data?.nodeType as NodeType | undefined
+    const targetType = targetNode.data?.nodeType as NodeType | undefined
+
+    // Check if source is a branching output node
+    if (sourceType && isBranchingOutputNodeType(sourceType)) {
+      const parentId = sourceNode.data?.parentNodeId as string | undefined
+      if (parentId && moduleIds.has(parentId)) {
+        // This edge comes from a branching node's output
+        const outputIndex = typeof sourceNode.data?.outputIndex === 'number' 
+          ? sourceNode.data.outputIndex 
+          : 0
+        
+        // Get the target module ID
+        let targetModuleId = targetNode.id
+        if (targetType && isBranchingOutputNodeType(targetType)) {
+          const targetParentId = targetNode.data?.parentNodeId as string | undefined
+          if (targetParentId && moduleIds.has(targetParentId)) {
+            targetModuleId = targetParentId
+          }
+        }
+        
+        if (moduleIds.has(targetModuleId)) {
+          // Track that this target node connects to a branching node
+          nodesConnectingToBranching.set(targetModuleId, {
+            branchingId: parentId,
+            outputIndex,
+          })
+        }
+      }
+    }
+  }
+
+  // Adjust positions for nodes that connect to branching nodes
+  // Position them closer to the branching node's output connection area
+  for (const [targetId, { branchingId, outputIndex }] of nodesConnectingToBranching.entries()) {
+    const branchingPos = positions.get(branchingId)
+    const targetPos = positions.get(targetId)
+    if (!branchingPos || !targetPos) continue
+
+    // Calculate where the output node would be positioned
+    // This approximates the output node's Y position based on the branching layout constants
+    const layoutConstants = getBranchingLayoutConstants()
+    const outputY = branchingPos.y + layoutConstants.headerHeight + layoutConstants.outputSpacing + 
+                    layoutConstants.firstOutputExtraSpacing + 
+                    outputIndex * (layoutConstants.outputNodeHeight + layoutConstants.outputSpacing)
+
+    // Adjust target node's Y to be closer to the output connection point
+    // Blend the output Y position with the current grid position
+    const blendFactor = 0.7 // 70% towards output position, 30% keep grid position
+    const adjustedY = targetPos.y * (1 - blendFactor) + outputY * blendFactor
+    positions.set(targetId, { ...targetPos, y: adjustedY })
+  }
+
+  // 8) Apply positions to module nodes
   const updatedNodes: Node[] = nodes.map((node) => {
     const nodeType = node.data?.nodeType as NodeType | undefined
     if (nodeType && isBranchingOutputNodeType(nodeType)) {
@@ -199,7 +520,7 @@ export function autoLayout(
     }
   })
 
-  // 7) Reposition branching outputs relative to their parents
+  // 9) Reposition branching outputs relative to their parents
   const branchingIds = new Set<string>()
   updatedNodes.forEach((node) => {
     const nodeType = node.data?.nodeType as NodeType | undefined

@@ -4,12 +4,9 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
 
 ## TODO
 
-- maddie fication
-    - corresponding json
-    - start and end
-    - stickers
 - maintenance
     - refactoring
+- testing
     - unit
     - cypress
 

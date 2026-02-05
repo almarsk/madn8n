@@ -25,6 +25,8 @@ interface NodePopupMenuProps {
   onPositionChange?: (position: { x: number; y: number } | null) => void
   // Flow config mode
   isFlowConfig?: boolean
+  // Sticker menu mode (shows only sticker management)
+  isStickerMenu?: boolean
   flowMetadata?: {
     description: string
     language: string
@@ -33,6 +35,8 @@ interface NodePopupMenuProps {
     omnichannel_config?: Record<string, any>
     stickers?: Record<string, any>
   }
+  // For sticker nodes, we need access to flowMetadata to show sticker dropdown
+  stickers?: Record<string, any>
   onFlowMetadataUpdate?: (metadata: {
     description: string
     language: string
@@ -187,10 +191,12 @@ export default function NodePopupMenu({
   initialPosition,
   onPositionChange,
   isFlowConfig = false,
+  isStickerMenu = false,
   flowMetadata,
   onFlowMetadataUpdate,
   toolbarRef,
   title,
+  stickers,
 }: NodePopupMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
@@ -865,8 +871,233 @@ export default function NodePopupMenu({
         </div>
       </div>
       <div className="node-popup-menu-content" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        {/* Sticker Management Menu - Show only sticker management */}
+        {isStickerMenu && (
+          <div style={{ padding: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, color: 'rgba(226, 232, 240, 0.9)', fontSize: '1rem', fontWeight: 600 }}>
+                Stickers
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  // Generate a new sticker ID
+                  const newId = `S${Object.keys(metadata.stickers || {}).length + 1}`
+                  const updated = {
+                    ...metadata,
+                    stickers: {
+                      ...metadata.stickers,
+                      [newId]: {
+                        name: 'default',
+                        description: '',
+                        appearance: { color: '#fceaea' },
+                      },
+                    },
+                  }
+                  setMetadata(updated)
+                  if (onFlowMetadataUpdate) {
+                    onFlowMetadataUpdate(updated)
+                  }
+                }}
+                style={{
+                  padding: '0.375rem 0.75rem',
+                  border: '1px solid rgba(148, 163, 184, 0.7)',
+                  borderRadius: '4px',
+                  background: 'rgba(30, 41, 59, 0.9)',
+                  color: '#e5e7eb',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  fontWeight: 500,
+                }}
+              >
+                + Add Sticker
+              </button>
+            </div>
+            {metadata.stickers && Object.keys(metadata.stickers).length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {Object.entries(metadata.stickers).map(([id, sticker]: [string, any]) => (
+                  <div
+                    key={id}
+                    style={{
+                      padding: '0.75rem',
+                      border: '1px solid rgba(148, 163, 184, 0.3)',
+                      borderRadius: '4px',
+                      background: 'rgba(30, 41, 59, 0.5)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                      <div style={{ flex: 1 }}>
+                        <input
+                          type="text"
+                          value={sticker.name || ''}
+                          onChange={(e) => {
+                            const updated = {
+                              ...metadata,
+                              stickers: {
+                                ...metadata.stickers,
+                                [id]: {
+                                  ...sticker,
+                                  name: e.target.value,
+                                },
+                              },
+                            }
+                            setMetadata(updated)
+                            if (onFlowMetadataUpdate) {
+                              onFlowMetadataUpdate(updated)
+                            }
+                          }}
+                          placeholder="Sticker name"
+                          style={{
+                            width: '100%',
+                            padding: '0.375rem 0.5rem',
+                            border: '1px solid rgba(148, 163, 184, 0.5)',
+                            borderRadius: '4px',
+                            background: 'rgba(15, 23, 42, 0.9)',
+                            color: '#e5e7eb',
+                            fontSize: '0.875rem',
+                            marginBottom: '0.5rem',
+                          }}
+                        />
+                        <textarea
+                          value={sticker.description || ''}
+                          onChange={(e) => {
+                            const updated = {
+                              ...metadata,
+                              stickers: {
+                                ...metadata.stickers,
+                                [id]: {
+                                  ...sticker,
+                                  description: e.target.value,
+                                },
+                              },
+                            }
+                            setMetadata(updated)
+                            if (onFlowMetadataUpdate) {
+                              onFlowMetadataUpdate(updated)
+                            }
+                          }}
+                          placeholder="Description (optional)"
+                          style={{
+                            width: '100%',
+                            padding: '0.375rem 0.5rem',
+                            border: '1px solid rgba(148, 163, 184, 0.5)',
+                            borderRadius: '4px',
+                            background: 'rgba(15, 23, 42, 0.9)',
+                            color: '#e5e7eb',
+                            fontSize: '0.875rem',
+                            minHeight: '50px',
+                            resize: 'vertical',
+                            fontFamily: 'inherit',
+                          }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = { ...metadata }
+                          const newStickers = { ...updated.stickers }
+                          delete newStickers[id]
+                          updated.stickers = newStickers
+                          setMetadata(updated)
+                          if (onFlowMetadataUpdate) {
+                            onFlowMetadataUpdate(updated)
+                          }
+                        }}
+                        style={{
+                          marginLeft: '0.5rem',
+                          padding: '0.25rem 0.5rem',
+                          border: '1px solid rgba(239, 68, 68, 0.5)',
+                          borderRadius: '4px',
+                          background: 'rgba(239, 68, 68, 0.1)',
+                          color: '#fca5a5',
+                          cursor: 'pointer',
+                          fontSize: '0.75rem',
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <label style={{ color: 'rgba(226, 232, 240, 0.9)', fontSize: '0.875rem' }}>
+                        Color:
+                      </label>
+                      <input
+                        type="color"
+                        value={sticker.appearance?.color || '#fceaea'}
+                        onChange={(e) => {
+                          const updated = {
+                            ...metadata,
+                            stickers: {
+                              ...metadata.stickers,
+                              [id]: {
+                                ...sticker,
+                                appearance: {
+                                  ...sticker.appearance,
+                                  color: e.target.value,
+                                },
+                              },
+                            },
+                          }
+                          setMetadata(updated)
+                          if (onFlowMetadataUpdate) {
+                            onFlowMetadataUpdate(updated)
+                          }
+                        }}
+                        style={{
+                          width: '40px',
+                          height: '30px',
+                          border: '1px solid rgba(148, 163, 184, 0.5)',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                        }}
+                      />
+                      <input
+                        type="text"
+                        value={sticker.appearance?.color || '#fceaea'}
+                        onChange={(e) => {
+                          const updated = {
+                            ...metadata,
+                            stickers: {
+                              ...metadata.stickers,
+                              [id]: {
+                                ...sticker,
+                                appearance: {
+                                  ...sticker.appearance,
+                                  color: e.target.value,
+                                },
+                              },
+                            },
+                          }
+                          setMetadata(updated)
+                          if (onFlowMetadataUpdate) {
+                            onFlowMetadataUpdate(updated)
+                          }
+                        }}
+                        placeholder="#fceaea"
+                        style={{
+                          flex: 1,
+                          padding: '0.375rem 0.5rem',
+                          border: '1px solid rgba(148, 163, 184, 0.5)',
+                          borderRadius: '4px',
+                          background: 'rgba(15, 23, 42, 0.9)',
+                          color: '#e5e7eb',
+                          fontSize: '0.875rem',
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ padding: '0.5rem', color: 'rgba(148, 163, 184, 0.8)', fontSize: '0.875rem' }}>
+                No stickers defined. Click "Add Sticker" to create one.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Flow Config Menu */}
-        {isFlowConfig && (
+        {isFlowConfig && !isStickerMenu && (
           <div style={{ padding: '1rem' }}>
             <div style={{ marginBottom: '1rem' }}>
               <label style={{
@@ -1313,8 +1544,56 @@ export default function NodePopupMenu({
           </div>
         )}
 
+        {/* Sticker Node Menu - Show dropdown for stickers */}
+        {!isFlowConfig && !isStickerMenu && nodeType === 'sticker' && module && module.name === 'StickerModule' && (
+          <div style={{ padding: '1rem' }}>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '0.375rem',
+                color: 'rgba(226, 232, 240, 0.9)',
+                fontSize: '0.875rem',
+                fontWeight: 500
+              }}>
+                Stickers
+                <span style={{ color: 'rgba(239, 68, 68, 0.8)', marginLeft: '0.25rem' }}>*</span>
+              </label>
+              <select
+                multiple
+                value={Array.isArray(params.stickers) ? params.stickers : []}
+                onChange={(e) => {
+                  const selected = Array.from(e.target.selectedOptions, option => option.value)
+                  handleParamChange('stickers', selected)
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 1.75rem 0.5rem 0.5rem',
+                  border: '1px solid rgba(148, 163, 184, 0.7)',
+                  borderRadius: '4px',
+                  background: 'rgba(15, 23, 42, 0.9)',
+                  color: '#e5e7eb',
+                  fontSize: '0.875rem',
+                  minHeight: '100px',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  MozAppearance: 'none',
+                }}
+              >
+                {stickers && Object.entries(stickers).map(([id, sticker]: [string, any]) => (
+                  <option key={id} value={id}>
+                    {sticker.name || id}
+                  </option>
+                ))}
+              </select>
+              <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'rgba(148, 163, 184, 0.8)' }}>
+                Hold Ctrl/Cmd to select multiple stickers
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Single Node Menu - Show all params */}
-        {!isFlowConfig && nodeType && !isBranchingNodeType(nodeType) && !isBranchingOutputNodeType(nodeType) && module && (
+        {!isFlowConfig && nodeType && !isBranchingNodeType(nodeType) && !isBranchingOutputNodeType(nodeType) && nodeType !== 'sticker' && module && (
           <div style={{ padding: '1rem' }}>
             {module.params.map((param) => {
               const defaultValue = getDefaultValue(param.type)

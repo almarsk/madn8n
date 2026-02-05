@@ -114,7 +114,7 @@ export const displayType = (typeStr: string | undefined): string => {
 }
 
 // Helper function to get node label from module config and node data
-export const getNodeLabel = (module: Module | undefined, nodeData: any, nodeType?: NodeType): string => {
+export const getNodeLabel = (module: Module | undefined, nodeData: any, nodeType?: NodeType, stickers?: Record<string, any>): string => {
   if (!module) {
     return nodeData?.label || 'Unknown'
   }
@@ -125,6 +125,23 @@ export const getNodeLabel = (module: Module | undefined, nodeData: any, nodeType
       return String(nodeData.params.value)
     }
     return nodeData?.label || 'Output'
+  }
+
+  // For sticker nodes: use sticker name from stickers data
+  if (nodeType === 'sticker' && module.name === 'StickerModule') {
+    const stickerIds = nodeData?.params?.stickers as string[] | undefined
+    if (stickerIds && Array.isArray(stickerIds) && stickerIds.length > 0 && stickers) {
+      // Use first sticker's name
+      const firstStickerId = stickerIds[0]
+      const sticker = stickers[firstStickerId]
+      if (sticker && sticker.name) {
+        return String(sticker.name)
+      }
+      // Fallback to sticker ID
+      return String(firstStickerId)
+    }
+    // Fallback to module name
+    return module.name
   }
 
   // If module has a labelParam, use that param's value

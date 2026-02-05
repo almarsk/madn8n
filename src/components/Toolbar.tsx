@@ -9,6 +9,8 @@ import UndoIcon from '@mui/icons-material/Undo'
 import RedoIcon from '@mui/icons-material/Redo'
 import CodeIcon from '@mui/icons-material/Code'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
+import LabelIcon from '@mui/icons-material/Label'
+import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong'
 import Tooltip from '@mui/material/Tooltip'
 
 interface ToolbarProps {
@@ -27,6 +29,8 @@ interface ToolbarProps {
   onOpenFlowConfigMenu: () => void
   onOpenJsonEditor: () => void
   onAutoLayout: () => void
+  onOpenStickerMenu: () => void
+  onFitView: () => void
 }
 
 export default function Toolbar({
@@ -45,9 +49,11 @@ export default function Toolbar({
   onOpenFlowConfigMenu,
   onOpenJsonEditor,
   onAutoLayout,
+  onOpenStickerMenu,
+  onFitView,
 }: ToolbarProps) {
   const [toolbarPosition, setToolbarPosition] = useState({ x: 16, y: 16 })
-  const [toolbarSize, setToolbarSize] = useState({ width: 280, height: 260 })
+  const [toolbarSize, setToolbarSize] = useState({ width: 240, height: 390 }) // 1.5x of 260, wider for 3x3 buttons
   const [isToolbarMinimized, setIsToolbarMinimized] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -56,8 +62,8 @@ export default function Toolbar({
     module.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  // Fixed width based on button bar - buttons will wrap to new lines
-  const TOOLBAR_FIXED_WIDTH = 280
+  // Width for 3x3 button grid - buttons spaced evenly
+  const TOOLBAR_FIXED_WIDTH = 240 // Wider for 3x3 buttons with even spacing
 
   const onToolbarMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -207,6 +213,7 @@ export default function Toolbar({
         <div className="nodes-toolbar-body" style={{ minHeight: 0, maxHeight: '100%', overflow: 'hidden' }}>
           <section className="nodes-toolbar-section">
             <div className="toolbar-nav">
+              {/* Line 1: map + verify + auto layout */}
               <div className="toolbar-nav-row">
                 <Tooltip
                   title={
@@ -220,7 +227,7 @@ export default function Toolbar({
                   placement="top"
                   disableInteractive
                 >
-                  <span>
+                  <span style={{ flex: 1 }}>
                     <button
                       type="button"
                       className={`toolbar-nav-button ${showMinimap ? 'toolbar-lock-button--active' : ''}`}
@@ -229,6 +236,7 @@ export default function Toolbar({
                       style={{
                         opacity: hasNodes ? 1 : 0.5,
                         cursor: hasNodes ? 'pointer' : 'not-allowed',
+                        width: '100%',
                       }}
                     >
                       <MapIcon fontSize="small" />
@@ -241,7 +249,7 @@ export default function Toolbar({
                   placement="top"
                   disableInteractive
                 >
-                  <span>
+                  <span style={{ flex: 1 }}>
                     <button
                       type="button"
                       className="toolbar-nav-button"
@@ -250,6 +258,7 @@ export default function Toolbar({
                       style={{
                         opacity: hasNodes ? 1 : 0.5,
                         cursor: hasNodes ? 'pointer' : 'not-allowed',
+                        width: '100%',
                       }}
                     >
                       <CheckCircleIcon fontSize="small" />
@@ -262,7 +271,7 @@ export default function Toolbar({
                   placement="top"
                   disableInteractive
                 >
-                  <span>
+                  <span style={{ flex: 1 }}>
                     <button
                       type="button"
                       className="toolbar-nav-button"
@@ -271,34 +280,57 @@ export default function Toolbar({
                       style={{
                         opacity: hasNodes ? 1 : 0.5,
                         cursor: hasNodes ? 'pointer' : 'not-allowed',
+                        width: '100%',
                       }}
                     >
                       <AccountTreeIcon fontSize="small" />
                     </button>
                   </span>
                 </Tooltip>
+              </div>
+              {/* Line 2: stickers, json editor, main config */}
+              <div className="toolbar-nav-row toolbar-nav-row--secondary">
+                <Tooltip title="Manage stickers" arrow placement="top" disableInteractive>
+                  <span style={{ flex: 1 }}>
+                    <button
+                      type="button"
+                      className="toolbar-nav-button"
+                      onClick={onOpenStickerMenu}
+                      style={{ width: '100%' }}
+                    >
+                      <LabelIcon fontSize="small" />
+                    </button>
+                  </span>
+                </Tooltip>
                 <Tooltip title="Open JSON editor" arrow placement="top" disableInteractive>
-                  <button
-                    type="button"
-                    className="toolbar-nav-button"
-                    onClick={onOpenJsonEditor}
-                  >
-                    <CodeIcon fontSize="small" />
-                  </button>
+                  <span style={{ flex: 1 }}>
+                    <button
+                      type="button"
+                      className="toolbar-nav-button"
+                      onClick={onOpenJsonEditor}
+                      style={{ width: '100%' }}
+                    >
+                      <CodeIcon fontSize="small" />
+                    </button>
+                  </span>
                 </Tooltip>
                 <Tooltip title="Flow configuration" arrow placement="top" disableInteractive>
-                  <button
-                    type="button"
-                    className="toolbar-nav-button flow-config-button"
-                    onClick={onOpenFlowConfigMenu}
-                  >
-                    <SettingsIcon fontSize="small" />
-                  </button>
+                  <span style={{ flex: 1 }}>
+                    <button
+                      type="button"
+                      className="toolbar-nav-button flow-config-button"
+                      onClick={onOpenFlowConfigMenu}
+                      style={{ width: '100%' }}
+                    >
+                      <SettingsIcon fontSize="small" />
+                    </button>
+                  </span>
                 </Tooltip>
               </div>
+              {/* Line 3: undo redo center */}
               <div className="toolbar-nav-row toolbar-nav-row--secondary">
-                <Tooltip title="Undo (Ctrl+Z)" arrow placement="top" disableInteractive>
-                  <span>
+                <Tooltip title={canUndo ? 'Undo' : 'Nothing to undo'} arrow placement="top" disableInteractive>
+                  <span style={{ flex: 1 }}>
                     <button
                       type="button"
                       className="toolbar-nav-button"
@@ -307,14 +339,32 @@ export default function Toolbar({
                       style={{
                         opacity: canUndo ? 1 : 0.5,
                         cursor: canUndo ? 'pointer' : 'not-allowed',
+                        width: '100%',
                       }}
                     >
                       <UndoIcon fontSize="small" />
                     </button>
                   </span>
                 </Tooltip>
-                <Tooltip title="Redo (Ctrl+Shift+Z)" arrow placement="top" disableInteractive>
-                  <span>
+                <Tooltip title={hasNodes ? 'Center view' : 'No nodes to center'} arrow placement="top" disableInteractive>
+                  <span style={{ flex: 1 }}>
+                    <button
+                      type="button"
+                      className="toolbar-nav-button"
+                      onClick={onFitView}
+                      disabled={!hasNodes}
+                      style={{
+                        opacity: hasNodes ? 1 : 0.5,
+                        cursor: hasNodes ? 'pointer' : 'not-allowed',
+                        width: '100%',
+                      }}
+                    >
+                      <CenterFocusStrongIcon fontSize="small" />
+                    </button>
+                  </span>
+                </Tooltip>
+                <Tooltip title={canRedo ? 'Redo' : 'Nothing to redo'} arrow placement="top" disableInteractive>
+                  <span style={{ flex: 1 }}>
                     <button
                       type="button"
                       className="toolbar-nav-button"
@@ -323,6 +373,7 @@ export default function Toolbar({
                       style={{
                         opacity: canRedo ? 1 : 0.5,
                         cursor: canRedo ? 'pointer' : 'not-allowed',
+                        width: '100%',
                       }}
                     >
                       <RedoIcon fontSize="small" />

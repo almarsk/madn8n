@@ -98,18 +98,30 @@ export interface ReactFlowJson {
  */
 function buildDialogFromReactFlow(
   reactFlowData: ReactFlowJson,
+  metadata: CustomFlowMetadata,
   rootModuleIdHint?: string
 ): DialogConfig {
   const nodesById = new Map<string, ReactFlowJson['nodes'][number]>()
   reactFlowData.nodes.forEach((n) => nodesById.set(n.id, n))
 
-  // 1) Decide which ReactFlow nodes are "modules" (exclude branching outputs)
+  // 1) Decide which ReactFlow nodes are "modules" (exclude branching outputs and start node)
   const moduleIds: string[] = []
+  let startNodeId: string | undefined
   for (const node of reactFlowData.nodes) {
     const nodeType = (node.data?.nodeType || node.type) as NodeType
+    const moduleName = node.data?.moduleName
+
+    // Skip branching output nodes
     if (isBranchingOutputNodeType(nodeType)) {
       continue
     }
+
+    // Track start node separately - it doesn't appear in modules
+    if (moduleName === 'Start' || nodeType === 'outputOnly') {
+      startNodeId = node.id
+      continue
+    }
+
     moduleIds.push(node.id)
   }
 
@@ -124,7 +136,11 @@ function buildDialogFromReactFlow(
       : undefined
 
     // Use module name as type (e.g., "Type 1", "Branching") not node type
-    const moduleTypeString = moduleMeta?.name || (nodeType as string) || 'single'
+    // Special case: "End" module exports as "Exit"
+    let moduleTypeString = moduleMeta?.name || (nodeType as string) || 'single'
+    if (moduleTypeString === 'End') {
+      moduleTypeString = 'Exit'
+    }
 
     const params = (node.data?.params || {}) as Record<string, any>
 
@@ -179,18 +195,46 @@ function buildDialogFromReactFlow(
     module.handlers.node_exit = edge.target
   }
 
-  // 4) Determine root module – prefer explicit hint, otherwise first node without incoming edges
+  // 4) Determine root module from start node's handler, or fallback logic
   const incomingTargets = new Set<string>()
   for (const edge of reactFlowData.edges) {
     incomingTargets.add(edge.target)
   }
 
-  let rootModule = rootModuleIdHint && moduleIds.includes(rootModuleIdHint)
-    ? rootModuleIdHint
-    : moduleIds.find((id) => !incomingTargets.has(id)) || moduleIds[0] || ''
+  let rootModule = ''
 
+  // If start node exists, use its outgoing edge target as root_module
+  if (startNodeId) {
+    const startEdge = reactFlowData.edges.find((e) => e.source === startNodeId)
+    if (startEdge) {
+      // The target might be an output node, so we need to resolve to the actual module
+      const targetNode = reactFlowData.nodes.find((n) => n.id === startEdge.target)
+      if (targetNode) {
+        const targetType = (targetNode.data?.nodeType || targetNode.type) as NodeType
+        if (isBranchingOutputNodeType(targetType)) {
+          // If target is an output node, use its parent
+          const parentId = targetNode.data?.parentNodeId as string | undefined
+          if (parentId && moduleIds.includes(parentId)) {
+            rootModule = parentId
+          } else if (startEdge.target && moduleIds.includes(startEdge.target)) {
+            rootModule = startEdge.target
+          }
+        } else if (startEdge.target && moduleIds.includes(startEdge.target)) {
+          rootModule = startEdge.target
+        }
+      }
+    }
+  }
+
+  // Fallback: prefer explicit hint, otherwise first node without incoming edges
   if (!rootModule) {
-    // No nodes – return an empty dialog skeleton
+    rootModule = rootModuleIdHint && moduleIds.includes(rootModuleIdHint)
+      ? rootModuleIdHint
+      : moduleIds.find((id) => !incomingTargets.has(id)) || moduleIds[0] || ''
+  }
+
+  if (!rootModule && moduleIds.length === 0) {
+    // No modules – return an empty dialog skeleton
     return {
       modules: {},
       root_module: '',
@@ -199,10 +243,36 @@ function buildDialogFromReactFlow(
     }
   }
 
+  // Collect stickers from sticker nodes
+  const stickers: Record<string, any> = {}
+  for (const nodeId of moduleIds) {
+    const node = nodesById.get(nodeId)!
+    const nodeType = (node.data?.nodeType || node.type) as NodeType
+    const moduleMeta = node.data?.moduleName
+      ? modules.find((m) => m.name === node.data.moduleName)
+      : undefined
+
+    // Check if this is a sticker node
+    if (nodeType === 'sticker' && moduleMeta?.name === 'StickerModule') {
+      const stickerIds = node.data?.params?.stickers as string[] | undefined
+      if (stickerIds && Array.isArray(stickerIds)) {
+        stickerIds.forEach((stickerId) => {
+          // Get sticker data from metadata or create placeholder
+          const stickerData = metadata.stickers?.[stickerId] || {
+            name: stickerId,
+            description: '',
+            appearance: { color: '#fceaea' },
+          }
+          stickers[stickerId] = stickerData
+        })
+      }
+    }
+  }
+
   return {
     modules: modulesRecord,
     root_module: rootModule,
-    stickers: {}, // stickers handled separately in metadata, keep dialog stickers empty for now
+    stickers,
     initial_user_response_timeout: 1800,
   }
 }
@@ -239,7 +309,7 @@ export function translateReactFlowToCustom(
   reactFlowData: ReactFlowJson,
   metadata: CustomFlowMetadata
 ): CustomFlowJson {
-  const dialog = buildDialogFromReactFlow(reactFlowData)
+  const dialog = buildDialogFromReactFlow(reactFlowData, metadata)
 
   // Derive dialog-level initial timeout from omnichannel_config if available
   const omniVoice = metadata.omnichannel_config?.voice ?? {}
@@ -301,7 +371,12 @@ export function translateCustomToReactFlow(customData: CustomFlowJson): {
     const outputNodesByParent = new Map<string, Node[]>()
 
     for (const [moduleId, moduleDef] of entries) {
-      const moduleTypeStr = moduleDef.type as string
+      let moduleTypeStr = moduleDef.type as string
+
+      // Special case: "Exit" maps back to "End" module
+      if (moduleTypeStr === 'Exit') {
+        moduleTypeStr = 'End'
+      }
 
       // Find module definition by name (type field contains module name)
       const moduleMeta = modules.find((m) => m.name === moduleTypeStr)
@@ -394,8 +469,34 @@ export function translateCustomToReactFlow(customData: CustomFlowJson): {
       })
     }
 
-    // Apply automatic layout – use dialog.root_module as a hint
+    // Create start node if root_module exists - start node's handler points to root_module
     const rootModuleId = dialog.root_module || undefined
+    if (rootModuleId && reactFlowNodes.length > 0) {
+      const startModule = modules.find((m) => m.name === 'Start')
+      if (startModule) {
+        // Find the root module node to position start node to its left
+        const rootNode = reactFlowNodes.find((n) => n.id === rootModuleId)
+        const startPosition = rootNode
+          ? { x: rootNode.position.x - 250, y: rootNode.position.y }
+          : { x: 0, y: 0 }
+
+        const startNode = createNodeFromConfig(startModule.type as NodeType, startPosition, {
+          moduleName: 'Start',
+          connectingFrom: null,
+        })
+
+        // Add edge from start node to root module
+        reactFlowNodes.push(startNode)
+        reactFlowEdges.push({
+          id: `start_${rootModuleId}`,
+          source: startNode.id,
+          target: rootModuleId,
+          type: 'default',
+        } as Edge)
+      }
+    }
+
+    // Apply automatic layout – use dialog.root_module as a hint
     const laidOutNodes = autoLayout(reactFlowNodes, reactFlowEdges, rootModuleId)
 
     return {

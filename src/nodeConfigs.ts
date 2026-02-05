@@ -1,6 +1,6 @@
 export interface NodeConfig {
   name: string
-  type: 'single' | 'branching' | 'branchingOutput'
+  type: 'single' | 'branching' | 'branchingOutput' | 'inputOnly' | 'outputOnly' | 'sticker'
   description: string
   hasSourceHandles: boolean
   hasTargetHandles: boolean
@@ -101,6 +101,43 @@ export const nodeConfigs: Record<string, NodeConfig> = {
     defaultHeight: 60,
     zIndex: 11, // Slightly higher than parent to ensure outputs are above parent
     canBeDeleted: true, // Can be deleted
+  },
+  inputOnly: {
+    name: 'Input Only',
+    type: 'inputOnly',
+    description: 'Node with only input (no output)',
+    hasSourceHandles: false,
+    hasTargetHandles: true,
+    canStartConnection: false,
+    isModuleType: true,
+    defaultWidth: 220,
+    defaultHeight: 80,
+    zIndex: 2,
+  },
+  outputOnly: {
+    name: 'Output Only',
+    type: 'outputOnly',
+    description: 'Node with only output (no input)',
+    hasSourceHandles: true,
+    hasTargetHandles: false,
+    canStartConnection: true,
+    isModuleType: true,
+    defaultWidth: 220,
+    defaultHeight: 80,
+    zIndex: 2,
+  },
+  sticker: {
+    name: 'Sticker',
+    type: 'sticker',
+    description: 'Small sticker node with one input and one output',
+    hasSourceHandles: true,
+    hasTargetHandles: true,
+    canStartConnection: true,
+    isModuleType: true,
+    className: 'sticker-node',
+    defaultWidth: 150,
+    defaultHeight: 50,
+    zIndex: 2,
   },
 }
 

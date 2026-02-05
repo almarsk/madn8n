@@ -1,12 +1,13 @@
 import { Handle, Position, type NodeProps, useReactFlow } from 'reactflow'
 import nodeConfigs, {
-  type NodeConfig,
-  type NodeType,
-  isBranchingNodeType,
-  isBranchingOutputNodeType,
-  canOutputNodeBeDeleted,
-  NODE_TYPES,
+    type NodeConfig,
+    type NodeType,
+    isBranchingNodeType,
+    isBranchingOutputNodeType,
+    canOutputNodeBeDeleted,
+    NODE_TYPES,
 } from './nodeConfigs'
+import modules from './modules'
 import { useCallback } from 'react'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import Tooltip from '@mui/material/Tooltip'
@@ -94,6 +95,12 @@ function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
     // Determine cursor style
     const cursorStyle = hasOutgoingEdge ? 'default' : 'grab'
 
+    // Check if menu should be shown - check module config
+    // Output nodes with isModuleType=false don't show menu, and modules with showMenu=false don't show menu
+    const moduleName = currentNode?.data?.moduleName
+    const module = moduleName ? modules.find((m) => m.name === moduleName) : undefined
+    const showMenu = !isBranchingOutputNodeType(nodeType) && (module?.showMenu !== false)
+
     // For branching nodes, prevent clicks on the container from selecting the node
     // Only the header should be clickable for selection (but not menu opening - that's only via three dots)
     const handleBranchingNodeMouseDown = (e: React.MouseEvent) => {
@@ -102,22 +109,28 @@ function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
         const target = e.target as HTMLElement
         const isClickOnHeader = target.closest('.branching-node-header') !== null
         const isClickOnMenuIcon = target.closest('.dynamic-node-label-menu-icon') !== null
-        
+
         // Allow menu icon clicks to work
         if (isClickOnMenuIcon) {
             return
         }
-        
+
         if (!isClickOnHeader) {
             e.stopPropagation()
             e.preventDefault()
         }
     }
 
+    // Apply sticker color if available
+    const stickerColor = (data as any).stickerColor
+    const nodeStyle = stickerColor
+        ? { cursor: cursorStyle, backgroundColor: stickerColor }
+        : { cursor: cursorStyle }
+
     return (
         <div
             className={nodeClasses}
-            style={{ cursor: cursorStyle }}
+            style={nodeStyle}
             onClick={isBranchingOutputNodeType(nodeType) ? handleNodeClick : undefined}
             onMouseDown={isBranchingNodeType(nodeType) ? handleBranchingNodeMouseDown : undefined}
         >
@@ -125,22 +138,24 @@ function NodeFactory({ data, id, selected }: NodeProps<NodeFactoryData>) {
                 className={`dynamic-node-label ${isBranchingNodeType(nodeType) ? 'branching-node-header' : ''}`}
             >
                 <span className="dynamic-node-label-text">{data.label}</span>
-                <div
-                    className="dynamic-node-label-menu-opener"
-                    onClick={handleMenuIconClick}
-                    title="Open node menu"
-                >
-                    <Tooltip title="Open node menu" arrow placement="top" disableInteractive>
-                        <button
-                            type="button"
-                            className="dynamic-node-label-menu-icon"
-                            onClick={handleMenuIconClick}
-                            aria-label="Open node menu"
-                        >
-                            <MoreVertIcon fontSize="small" />
-                        </button>
-                    </Tooltip>
-                </div>
+                {showMenu && (
+                    <div
+                        className="dynamic-node-label-menu-opener"
+                        onClick={handleMenuIconClick}
+                        title="Open node menu"
+                    >
+                        <Tooltip title="Open node menu" arrow placement="top" disableInteractive>
+                            <button
+                                type="button"
+                                className="dynamic-node-label-menu-icon"
+                                onClick={handleMenuIconClick}
+                                aria-label="Open node menu"
+                            >
+                                <MoreVertIcon fontSize="small" />
+                            </button>
+                        </Tooltip>
+                    </div>
+                )}
             </div>
 
             {/* Target handles - render if config allows */}
