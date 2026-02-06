@@ -61,9 +61,6 @@ function App() {
   // Track which nodes are currently being dragged to give them highest z-index
   const draggingNodeIdsRef = useRef<Set<string>>(new Set())
 
-  // Track when we're in the middle of a programmatic deletion (not from ReactFlow's built-in delete)
-  // This prevents handleEdgesChange/handleNodesChange from saving history during our explicit deletion
-  const isProgrammaticDeletionRef = useRef(false)
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
