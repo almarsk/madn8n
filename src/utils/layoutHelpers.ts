@@ -238,11 +238,88 @@ export function autoLayout(
     sortedLayers.set(level, [
       ...fromBranching.map(n => n.id),
       ...sortedBySource.flatMap(([_, nodeIds]) => nodeIds),
-      ...others
+      ...others,
     ])
   }
 
-  // 6) Simple grid layout with overlap detection and resolution
+  /**
+   * 6) Reduce edge crossings by reordering nodes within each layer
+   *
+   * We apply a simple barycenter-based heuristic:
+   * - For each layer > 0, compute the average index of each node's predecessors
+   *   in the previous layer.
+   * - Sort nodes in the current layer by this average index.
+   *
+   * This keeps children roughly aligned with their parents and helps avoid
+   * unnecessary edge crossings while preserving the existing grouping logic
+   * (branching outputs first, then source groups, then others) as a baseline.
+   */
+  const crossingReducedLayers = new Map<number, string[]>()
+
+  for (const level of sortedLevels) {
+    const originalLayer = sortedLayers.get(level) || []
+
+    // Nothing to reorder in the root layer
+    if (level === 0) {
+      crossingReducedLayers.set(level, [...originalLayer])
+      continue
+    }
+
+    const prevLevel = level - 1
+    const prevLayer =
+      crossingReducedLayers.get(prevLevel) ||
+      sortedLayers.get(prevLevel) ||
+      []
+
+    const indexInPrev = new Map<string, number>()
+    prevLayer.forEach((id, idx) => {
+      indexInPrev.set(id, idx)
+    })
+
+    const nodesWithBarycenter = originalLayer.map((nodeId, originalIndex) => {
+      // Only consider predecessors from the immediately previous level
+      const predecessors = moduleEdges.filter(
+        (e) => e.to === nodeId && (levelByModule.get(e.from) ?? -1) === prevLevel
+      )
+
+      if (predecessors.length === 0) {
+        // No predecessors from previous layer: keep relative order
+        return {
+          nodeId,
+          barycenter: originalIndex + 0.5,
+          originalIndex,
+        }
+      }
+
+      const sum = predecessors.reduce((acc, edge) => {
+        const idx = indexInPrev.get(edge.from)
+        return acc + (idx !== undefined ? idx : originalIndex)
+      }, 0)
+
+      const barycenter = sum / predecessors.length
+
+      return {
+        nodeId,
+        barycenter,
+        originalIndex,
+      }
+    })
+
+    nodesWithBarycenter.sort((a, b) => {
+      if (a.barycenter !== b.barycenter) {
+        return a.barycenter - b.barycenter
+      }
+      // Stable fallback to original ordering within the layer
+      return a.originalIndex - b.originalIndex
+    })
+
+    crossingReducedLayers.set(
+      level,
+      nodesWithBarycenter.map((n) => n.nodeId)
+    )
+  }
+
+  // 7) Simple grid layout with overlap detection and resolution
   const positions = new Map<string, { x: number; y: number }>()
   const GRID_X_SPACING = 300
   const GRID_Y_SPACING = 150
@@ -277,7 +354,10 @@ export function autoLayout(
   })
 
   for (const level of sortedLevels) {
-    const layer = sortedLayers.get(level) || []
+    const layer =
+      crossingReducedLayers.get(level) ||
+      sortedLayers.get(level) ||
+      []
     const baseX = VIEWPORT_OFFSET_X + level * GRID_X_SPACING
 
     for (let j = 0; j < layer.length; j++) {
