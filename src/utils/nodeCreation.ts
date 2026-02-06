@@ -1,8 +1,9 @@
 import { type Node } from 'reactflow'
 import nodeConfigs, { type NodeType, NODE_TYPES } from '../nodeConfigs'
 import modules from '../modules'
-import { parseType, getNodeLabel, getId } from './nodeUtils'
+import { getNodeLabel, getId } from './nodeUtils'
 import { getBranchingLayoutConstants, calculateOutputNodePosition, calculateBranchingNodeHeight } from './branchingNodeHelpers'
+import { getDefaultValueForType } from './configHelpers'
 
 // ReactFlow component type - all nodes use the NodeFactory component
 export const REACTFLOW_NODE_TYPE = 'nodeFactory'
@@ -32,19 +33,8 @@ export const createNodeFromConfig = (
   const initialParams: Record<string, any> = {}
   if (module) {
     module.params.forEach((param) => {
-      // Set default value based on type
-      const { base } = parseType(param.type)
-      if (base === 'number' || base === 'int' || base === 'float') {
-        initialParams[param.name] = 0
-      } else if (base === 'boolean' || base === 'bool') {
-        initialParams[param.name] = false
-      } else if (base === 'list') {
-        initialParams[param.name] = []
-      } else if (base === 'dict') {
-        initialParams[param.name] = {}
-      } else {
-        initialParams[param.name] = ''
-      }
+      // Set default value using centralized helper
+      initialParams[param.name] = getDefaultValueForType(param.type)
     })
   }
 
@@ -151,7 +141,7 @@ export const createBranchingNodeWithOutputs = (
   const outputNodes: Node[] = []
 
   for (let i = 0; i < outputCount; i++) {
-    let outputParams: Record<string, any> = {}
+    const outputParams: Record<string, any> = {}
 
     if (module?.outputConfig) {
       if (module.outputConfig.type === 'listParam') {

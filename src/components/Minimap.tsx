@@ -64,9 +64,6 @@ function Minimap({ nodes, edges, reactFlowInstance, viewport, reactFlowWrapper }
     // Top-left corner of viewport in flow coordinates
     const viewportMinX = -viewport.x / viewport.zoom
     const viewportMinY = -viewport.y / viewport.zoom
-    const viewportMaxX = viewportMinX + viewportWidth
-    const viewportMaxY = viewportMinY + viewportHeight
-
     // Convert viewport rectangle to minimap coordinates
     const viewportRectX = (viewportMinX - minX) * scale + PADDING
     const viewportRectY = (viewportMinY - minY) * scale + PADDING

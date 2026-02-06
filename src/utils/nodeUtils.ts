@@ -2,6 +2,7 @@ import { type Node } from 'reactflow'
 import { type Module } from '../modules'
 import nodeConfigs, { type NodeType, NODE_TYPES } from '../nodeConfigs'
 import modules from '../modules'
+import { isStickerModule } from './moduleHelpers'
 
 // Helper to parse Pythonic type notation recursively (e.g., "list[str]", "dict", "list[list[str]]", "dict[str, dict[str, list[list[str]]]]")
 // Returns the base type and the innermost type (for lists, this is the element type)
@@ -128,8 +129,11 @@ export const getNodeLabel = (module: Module | undefined, nodeData: any, nodeType
   }
 
   // For sticker nodes: use sticker name from stickers data
-  if (nodeType === 'sticker' && module.name === 'StickerModule') {
-    const stickerIds = nodeData?.params?.stickers as string[] | undefined
+  // Find the parameter with type "stickers" (not just a parameter named "stickers")
+  if (isStickerModule(module.name)) {
+    const stickersParam = module.params?.find(p => p.type === 'stickers')
+    const stickersParamName = stickersParam?.name
+    const stickerIds = stickersParamName ? (nodeData?.params?.[stickersParamName] as string[] | undefined) : undefined
     if (stickerIds && Array.isArray(stickerIds) && stickerIds.length > 0 && stickers) {
       // Use first sticker's name
       const firstStickerId = stickerIds[0]
@@ -170,12 +174,12 @@ export const getId = (moduleName?: string, nodeType?: string): string => {
     // Convert node type to snake_case
     baseName = nodeType.toLowerCase().replace(/\s+/g, '_')
   }
-  
+
   // Get or initialize counter for this base name
   if (!nodeIdCounters[baseName]) {
     nodeIdCounters[baseName] = 0
   }
-  
+
   // Increment and return ID
   return `${baseName}_${++nodeIdCounters[baseName]}`
 }

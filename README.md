@@ -4,11 +4,12 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
 
 ## TODO
 
-- features
-    - sticker menu
-- maintenance
-    - refactoring
 - testing
+    - manual + fixes
+        - run `yarn eslint . --fix; yarn tsc` and fix issues
+        - node added by click should also have high z index to not hide behind edges
+        - code review
+        - history doesnt work well
     - unit
     - cypress
 

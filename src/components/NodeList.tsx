@@ -9,7 +9,7 @@ interface NodeListProps {
 export default function NodeList({ modules, onNodeDragStart, onSidebarNodeClick }: NodeListProps) {
   // Filter modules to only show those that should appear in toolbar
   const visibleModules = modules.filter((module) => module.showInToolbar !== false)
-  
+
   return (
     <div className="nodes-list">
       {visibleModules.map((module) => (

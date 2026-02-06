@@ -1,9 +1,10 @@
 import { type Node, type Edge, MarkerType } from 'reactflow'
-import { type NodeType, isBranchingOutputNodeType, isBranchingNodeType } from '../nodeConfigs'
+import { type NodeType, isBranchingOutputNodeType, isBranchingNodeType, nodeConfigs } from '../nodeConfigs'
 import modules from '../modules'
 import { REACTFLOW_NODE_TYPE, createBranchingNodeWithOutputs, createNodeFromConfig } from './nodeCreation'
 import { autoLayout } from './layoutHelpers'
-import { calculateOutputNodePosition, getBranchingLayoutConstants, calculateBranchingNodeHeight, updateBranchingNodeHeight } from './branchingNodeHelpers'
+import { calculateOutputNodePosition, getBranchingLayoutConstants, calculateBranchingNodeHeight } from './branchingNodeHelpers'
+import { isStartModule, getStartModule, isStickerNode } from './moduleHelpers'
 
 // Custom JSON format types
 export interface CustomFlowMetadata {
@@ -91,11 +92,32 @@ export interface ReactFlowJson {
 }
 
 /**
+ * Get handler names for a module from its configuration.
+ * Returns the handlers array from module config, or defaults based on node type.
+ */
+function getHandlerNamesForModule(moduleMeta: typeof modules[number] | undefined, nodeType: NodeType): string[] {
+  // If module has explicit handlers configured, use them
+  if (moduleMeta?.handlers && moduleMeta.handlers.length > 0) {
+    return moduleMeta.handlers
+  }
+
+  // For branching nodes, handlers are determined dynamically from output nodes (on_0, on_1, etc.)
+  // This is handled separately in the code
+  if (isBranchingNodeType(nodeType)) {
+    return [] // Will be populated dynamically
+  }
+
+  // Default for simple nodes: use "on_1" as fallback
+  return ['on_1']
+}
+
+/**
  * Helper: build dialog.modules + handlers map from ReactFlow nodes/edges.
  *
  * - Each "module" corresponds to a node that is NOT a branching output node.
- * - Simple nodes get a single "node_exit" handler if they have an outgoing edge.
+ * - Simple nodes get handlers from module config (e.g., "on_1").
  * - Branching nodes collect handlers from their output nodes as "on_0", "on_1", ...
+ * - All nodes have handlers in the output (empty string if unconnected).
  */
 function buildDialogFromReactFlow(
   reactFlowData: ReactFlowJson,
@@ -118,7 +140,7 @@ function buildDialogFromReactFlow(
     }
 
     // Track start node separately - it doesn't appear in modules
-    if (moduleName === 'Start' || nodeType === 'outputOnly') {
+    if (isStartModule(moduleName)) {
       startNodeId = node.id
       continue
     }
@@ -136,15 +158,27 @@ function buildDialogFromReactFlow(
       ? modules.find((m) => m.name === node.data.moduleName)
       : undefined
 
-    // Use module name as type (e.g., "Type 1", "Branching") not node type
-    // Special case: "End" module exports as "Exit"
-    let moduleTypeString = moduleMeta?.name || (nodeType as string) || 'single'
-    if (moduleTypeString === 'End') {
-      moduleTypeString = 'Exit'
-    }
+    // Use name (now required field)
+    let moduleTypeString = moduleMeta?.name ?? (nodeType as string) ?? 'single'
 
     // Start with all params from the node
     let params = { ...(node.data?.params || {}) } as Record<string, any>
+
+    // Remove duplicate sticker params - check by type, not by name
+    // Find the first param with type 'stickers' and keep only that one
+    if (moduleMeta) {
+      const stickerParams = moduleMeta.params.filter(p => p.type === 'stickers')
+      if (stickerParams.length > 0) {
+        // Keep only the first sticker param (by its name)
+        const primaryStickerParamName = stickerParams[0].name
+        // Remove all other params that have type 'stickers'
+        stickerParams.forEach(stickerParam => {
+          if (stickerParam.name !== primaryStickerParamName && params[stickerParam.name] !== undefined) {
+            delete params[stickerParam.name]
+          }
+        })
+      }
+    }
 
     // For branching nodes with listParam, extract the listParam array from output nodes
     // This overwrites any listParam in the node's params with the one derived from output nodes
@@ -160,7 +194,7 @@ function buildDialogFromReactFlow(
         (n) => {
           const nodeType = n.data?.nodeType as NodeType | undefined
           const parentMatches = n.data?.parentNodeId === nodeId
-          const isOutputType = isBranchingOutputNodeType(nodeType)
+          const isOutputType = nodeType ? isBranchingOutputNodeType(nodeType) : false
           // Fallback: if nodeType is missing but parent matches and has params.value, treat as output
           // This is the pattern for listParam output nodes (they have params.value)
           const hasValueParam = n.data?.params?.value !== undefined
@@ -221,7 +255,7 @@ function buildDialogFromReactFlow(
 
   // 3) Derive handlers from edges
   // For branching nodes: extract handlers from edges connected to output nodes (daughter nodes)
-  // For normal nodes: extract node_exit handler from edges
+  // For normal nodes: extract handlers from module config
   for (const edge of reactFlowData.edges) {
     const sourceNode = nodesById.get(edge.source)
     const targetNode = nodesById.get(edge.target)
@@ -230,29 +264,29 @@ function buildDialogFromReactFlow(
     // Generic check: any node with parentNodeId is a daughter/output node
     // Map edges from daughter nodes to parent module with on_<index> handlers
     const parentId = sourceNode.data?.parentNodeId as string | undefined
-    
+
     if (parentId && modulesRecord[parentId]) {
       // This is a daughter/output node - map to parent module
-      
+
       // Try to get outputIndex from node data
       let outputIndex = sourceNode.data?.outputIndex
-      
+
       // If outputIndex is missing, calculate it from position relative to other output nodes
       if (typeof outputIndex !== 'number') {
         const parentNode = nodesById.get(parentId)
         if (parentNode) {
           // Find all output/daughter nodes for this parent (any node with this parentId)
-          const allOutputNodes = reactFlowData.nodes.filter((n) => 
+          const allOutputNodes = reactFlowData.nodes.filter((n) =>
             n.data?.parentNodeId === parentId
           )
-          
+
           // Sort by Y position (output nodes are typically stacked vertically)
           allOutputNodes.sort((a, b) => {
             const aY = a.position?.y ?? 0
             const bY = b.position?.y ?? 0
             return aY - bY
           })
-          
+
           // Find index of current node
           const index = allOutputNodes.findIndex((n) => n.id === sourceNode.id)
           outputIndex = index >= 0 ? index : 0
@@ -260,7 +294,7 @@ function buildDialogFromReactFlow(
           outputIndex = 0
         }
       }
-      
+
       const handlerKey = `on_${outputIndex}`
       const parentModule = modulesRecord[parentId]
       if (!parentModule.handlers) parentModule.handlers = {}
@@ -268,48 +302,81 @@ function buildDialogFromReactFlow(
       continue
     }
 
-    // Normal node: single "node_exit" handler
+    // Normal node: use handler from module config
     if (!modulesRecord[edge.source]) continue
     const module = modulesRecord[edge.source]
-    if (!module.handlers) module.handlers = {}
-    module.handlers.node_exit = edge.target
+    const sourceNodeType = (sourceNode.data?.nodeType || sourceNode.type) as NodeType
+    const sourceModuleMeta = sourceNode.data?.moduleName
+      ? modules.find((m) => m.name === sourceNode.data.moduleName)
+      : undefined
+
+    // Get handler names from module config
+    const handlerNames = getHandlerNamesForModule(sourceModuleMeta, sourceNodeType)
+
+    // Use the first handler name (most modules have a single handler)
+    // If multiple handlers exist, we'd need to determine which one to use based on edge context
+    // For now, assume single handler per simple node
+    if (handlerNames.length > 0) {
+      if (!module.handlers) module.handlers = {}
+      const handlerName = handlerNames[0]
+      module.handlers[handlerName] = edge.target
+    }
   }
 
-  // 3.5) Ensure all output/daughter nodes have handlers (even if unconnected)
-  // For all nodes with daughter nodes, ensure all outputs are present in handlers
-  for (const node of reactFlowData.nodes) {
-    const parentId = node.data?.parentNodeId as string | undefined
-    if (!parentId || !modulesRecord[parentId]) continue
-    
-    // This is a daughter/output node - ensure it has a handler
-    const parentModule = modulesRecord[parentId]
-    if (!parentModule.handlers) parentModule.handlers = {}
-    
-    // Get or calculate outputIndex
-    let outputIndex = node.data?.outputIndex
-    if (typeof outputIndex !== 'number') {
-      // Find all output/daughter nodes for this parent
-      const allOutputNodes = reactFlowData.nodes.filter((n) => 
-        n.data?.parentNodeId === parentId
+  // 3.5) Ensure all nodes have handlers (even if unconnected)
+  // For branching nodes: ensure all outputs have handlers
+  // For simple nodes: ensure configured handlers exist
+  for (const nodeId of moduleIds) {
+    const node = nodesById.get(nodeId)!
+    const nodeType = (node.data?.nodeType || node.type) as NodeType
+    const moduleMeta = node.data?.moduleName
+      ? modules.find((m) => m.name === node.data.moduleName)
+      : undefined
+
+    const module = modulesRecord[nodeId]
+    if (!module.handlers) module.handlers = {}
+
+    if (isBranchingNodeType(nodeType)) {
+      // For branching nodes: ensure all output nodes have handlers
+      const allOutputNodes = reactFlowData.nodes.filter((n) =>
+        n.data?.parentNodeId === nodeId
       )
-      
-      // Sort by Y position (output nodes are typically stacked vertically)
+
+      // Sort by outputIndex or position
       allOutputNodes.sort((a, b) => {
+        const aIndex = a.data?.outputIndex
+        const bIndex = b.data?.outputIndex
+        if (aIndex !== undefined && bIndex !== undefined) {
+          return aIndex - bIndex
+        }
         const aY = a.position?.y ?? 0
         const bY = b.position?.y ?? 0
         return aY - bY
       })
-      
-      // Find index of current node
-      const index = allOutputNodes.findIndex((n) => n.id === node.id)
-      outputIndex = index >= 0 ? index : 0
-    }
-    
-    const handlerKey = `on_${outputIndex}`
-    
-    // If handler doesn't exist, set it to empty string (unconnected output)
-    if (!(handlerKey in parentModule.handlers)) {
-      parentModule.handlers[handlerKey] = ''
+
+      // Ensure handlers exist for all output indices
+      for (let i = 0; i < allOutputNodes.length; i++) {
+        const handlerKey = `on_${i}`
+        if (!(handlerKey in module.handlers)) {
+          module.handlers[handlerKey] = ''
+        }
+      }
+
+      // Also check configured handlers for branching nodes (e.g., Branching2 has ["on_0", "on_1"])
+      const configuredHandlers = getHandlerNamesForModule(moduleMeta, nodeType)
+      for (const handlerName of configuredHandlers) {
+        if (!(handlerName in module.handlers)) {
+          module.handlers[handlerName] = ''
+        }
+      }
+    } else {
+      // For simple nodes: ensure all configured handlers exist
+      const handlerNames = getHandlerNamesForModule(moduleMeta, nodeType)
+      for (const handlerName of handlerNames) {
+        if (!(handlerName in module.handlers)) {
+          module.handlers[handlerName] = ''
+        }
+      }
     }
   }
 
@@ -366,21 +433,22 @@ function buildDialogFromReactFlow(
   const stickers: Record<string, any> = {}
   for (const nodeId of moduleIds) {
     const node = nodesById.get(nodeId)!
-    const nodeType = (node.data?.nodeType || node.type) as NodeType
-    const moduleMeta = node.data?.moduleName
-      ? modules.find((m) => m.name === node.data.moduleName)
-      : undefined
 
     // Check if this is a sticker node
-    if (nodeType === 'sticker' && moduleMeta?.name === 'StickerModule') {
-      const stickerIds = node.data?.params?.stickers as string[] | undefined
+    if (isStickerNode(node)) {
+      // Find the parameter with type "stickers" (not just a parameter named "stickers")
+      const moduleName = node.data?.moduleName
+      const moduleMeta = moduleName ? modules.find(m => m.name === moduleName) : undefined
+      const stickersParam = moduleMeta?.params?.find(p => p.type === 'stickers')
+      const stickersParamName = stickersParam?.name
+      const stickerIds = stickersParamName ? (node.data?.params?.[stickersParamName] as string[] | undefined) : undefined
       if (stickerIds && Array.isArray(stickerIds)) {
         stickerIds.forEach((stickerId) => {
           // Get sticker data from metadata or create placeholder
           const stickerData = metadata.stickers?.[stickerId] || {
             name: stickerId,
             description: '',
-            appearance: { color: '#fceaea' },
+            appearance: { color: 'rgba(30, 41, 59, 0.95)' },
           }
           stickers[stickerId] = stickerData
         })
@@ -507,12 +575,7 @@ export function translateCustomToReactFlow(
     for (const [moduleId, moduleDef] of entries) {
       let moduleTypeStr = moduleDef.type as string
 
-      // Special case: "Exit" maps back to "End" module
-      if (moduleTypeStr === 'Exit') {
-        moduleTypeStr = 'End'
-      }
-
-      // Find module definition by name (type field contains module name)
+      // Find module definition by name (now the only identifier)
       const moduleMeta = modules.find((m) => m.name === moduleTypeStr)
 
       const nodeType: NodeType =
@@ -524,7 +587,7 @@ export function translateCustomToReactFlow(
         // Branching node – create parent + output nodes using helper
         let outputCount = 1
         let listParamArray: any[] | null = null
-        
+
         // Determine output count from handlers (on_0, on_1, etc.)
         const handlers = moduleDef.handlers || {}
         let maxHandlerIndex = -1
@@ -538,7 +601,7 @@ export function translateCustomToReactFlow(
           }
         })
         const handlerBasedCount = maxHandlerIndex >= 0 ? maxHandlerIndex + 1 : 0
-        
+
         if (moduleMeta.outputConfig.type === 'internal') {
           // For internal, use the configured outputCount, but ensure it's at least handlerBasedCount
           outputCount = Math.max(moduleMeta.outputConfig.outputCount, handlerBasedCount)
@@ -549,12 +612,12 @@ export function translateCustomToReactFlow(
             : []
           // Use the maximum of listParam array length and handler-based count
           outputCount = Math.max(listParamArray.length || 1, handlerBasedCount || 1)
-          
+
           // Ensure listParamArray has enough entries for all outputs
           while (listParamArray.length < outputCount) {
             listParamArray.push('')
           }
-          
+
           // Remove listParam from params since it will be represented by output nodes
           // We'll restore it when translating back, but for ReactFlow it's in output nodes
           const { [listParamName]: _, ...paramsWithoutListParam } = params
@@ -609,7 +672,7 @@ export function translateCustomToReactFlow(
         for (let i = 1; i < created.length; i++) {
           const createdOutput = created[i]
           const outputIndex = i - 1 // outputIndex is 0-based
-          
+
           // Try to find existing output node by matching parentNodeId and outputIndex
           const existingOutput = existingNodes?.find(
             (n) =>
@@ -619,18 +682,19 @@ export function translateCustomToReactFlow(
           const out = existingOutput
             ? { ...existingOutput }
             : { ...createdOutput }
-          
+
           // CRITICAL: Always set unique ID for output node to avoid conflicts with module IDs
           // Use format: ${moduleId}_output_${outputIndex} to ensure uniqueness
           // Even if existingOutput exists, we need to ensure the ID is unique and doesn't conflict
           const uniqueOutputId = `${moduleId}_output_${outputIndex}`
           out.id = uniqueOutputId
-          
+
           // For listParam type, set the value from the array
           if (moduleMeta.outputConfig.type === 'listParam' && listParamArray) {
             const value = listParamArray[outputIndex] ?? ''
-            // Get the output node type from the created node, existing node, or module config
-            const outputNodeType = createdOutput.data?.nodeType || existingOutput?.data?.nodeType || moduleMeta.outputConfig.outputNodeType
+            // Get the output node type from the created node, existing node, or nodeConfig
+            const nodeConfig = nodeConfigs[moduleMeta.type]
+            const outputNodeType = createdOutput.data?.nodeType || existingOutput?.data?.nodeType || nodeConfig?.outputNodeType
             out.data = {
               ...out.data,
               nodeType: outputNodeType, // CRITICAL: Preserve nodeType so isBranchingOutputNodeType works
@@ -648,8 +712,9 @@ export function translateCustomToReactFlow(
               out.data.label = '_'
             }
           } else {
-            // Get the output node type from the created node, existing node, or module config
-            const outputNodeType = createdOutput.data?.nodeType || existingOutput?.data?.nodeType || moduleMeta.outputConfig.outputNodeType
+            // Get the output node type from the created node, existing node, or nodeConfig
+            const nodeConfig = nodeConfigs[moduleMeta.type]
+            const outputNodeType = createdOutput.data?.nodeType || existingOutput?.data?.nodeType || nodeConfig?.outputNodeType
             out.data = {
               ...out.data,
               nodeType: outputNodeType, // CRITICAL: Preserve nodeType so isBranchingOutputNodeType works
@@ -657,7 +722,7 @@ export function translateCustomToReactFlow(
               outputIndex: outputIndex,
             }
           }
-          
+
           // Preserve position from existing node if available, otherwise calculate correct position
           if (existingOutput) {
             out.position = existingOutput.position
@@ -683,9 +748,9 @@ export function translateCustomToReactFlow(
         const node = existingNode
           ? { ...existingNode }
           : createNodeFromConfig(nodeType, { x: 0, y: 0 }, {
-              moduleName: moduleMeta?.name || moduleTypeStr,
-              params,
-            })
+            moduleName: moduleMeta?.name || moduleTypeStr,
+            params,
+          })
         node.id = moduleId
         node.data = {
           ...node.data,
@@ -719,7 +784,7 @@ export function translateCustomToReactFlow(
         if (onMatch && parentOutputs.length > 0) {
           const index = parseInt(onMatch[1], 10)
           const outputNode = parentOutputs[index]
-          
+
           if (outputNode) {
             sourceId = outputNode.id
           }
@@ -742,7 +807,6 @@ export function translateCustomToReactFlow(
         // For output nodes inside branching nodes, use right-source handle
         // For regular nodes, use bottom-source handle as fallback
         const sourceNode = reactFlowNodes.find(n => n.id === sourceId)
-        const targetNode = reactFlowNodes.find(n => n.id === targetId)
         const isSourceOutputNode = sourceNode?.data?.parentNodeId !== undefined
         // When fallback is needed: output nodes (inside branching) → right, others → bottom
         const sourceHandle = isSourceOutputNode ? 'right-source' : 'bottom-source'
@@ -752,40 +816,40 @@ export function translateCustomToReactFlow(
         const existingEdge = existingEdgesMap.get(edgeId) ||
           existingEdges?.find((e) => e.source === sourceId && e.target === targetId)
         const edge = existingEdge
-          ? { 
-              ...existingEdge, 
-              id: edgeId, 
-              source: sourceId, 
-              target: targetId,
-              sourceHandle: existingEdge.sourceHandle ?? sourceHandle,
-              targetHandle: existingEdge.targetHandle ?? targetHandle,
-              // Preserve all edge properties
-              markerEnd: existingEdge.markerEnd,
-              markerStart: existingEdge.markerStart,
-              style: existingEdge.style,
-              animated: existingEdge.animated,
-              hidden: existingEdge.hidden,
-              selected: existingEdge.selected,
-              zIndex: existingEdge.zIndex,
-            }
+          ? {
+            ...existingEdge,
+            id: edgeId,
+            source: sourceId,
+            target: targetId,
+            sourceHandle: existingEdge.sourceHandle ?? sourceHandle,
+            targetHandle: existingEdge.targetHandle ?? targetHandle,
+            // Preserve all edge properties
+            markerEnd: existingEdge.markerEnd,
+            markerStart: existingEdge.markerStart,
+            style: existingEdge.style,
+            animated: existingEdge.animated,
+            hidden: existingEdge.hidden,
+            selected: existingEdge.selected,
+            zIndex: existingEdge.zIndex,
+          }
           : ({
-              id: edgeId,
-              source: sourceId,
-              target: targetId,
-              sourceHandle,
-              targetHandle,
-              type: 'default',
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                width: 20,
-                height: 20,
-                color: 'rgba(148, 163, 184, 0.8)',
-              },
-              style: {
-                strokeWidth: 2,
-                stroke: 'rgba(148, 163, 184, 0.8)',
-              },
-            } as Edge)
+            id: edgeId,
+            source: sourceId,
+            target: targetId,
+            sourceHandle,
+            targetHandle,
+            type: 'default',
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              width: 20,
+              height: 20,
+              color: 'rgba(148, 163, 184, 0.8)',
+            },
+            style: {
+              strokeWidth: 2,
+              stroke: 'rgba(148, 163, 184, 0.8)',
+            },
+          } as Edge)
         reactFlowEdges.push(edge)
       })
     }
@@ -793,18 +857,18 @@ export function translateCustomToReactFlow(
     // Create or update start node if root_module exists - start node's handler points to root_module
     const rootModuleId = dialog.root_module || undefined
     if (rootModuleId && reactFlowNodes.length > 0) {
-      const startModule = modules.find((m) => m.name === 'Start')
+      const startModule = getStartModule()
       if (startModule) {
         // Find existing start node
-        const existingStartNode = existingNodes?.find((n) => n.data?.moduleName === 'Start')
-        
+        const existingStartNode = existingNodes?.find((n) => isStartModule(n.data?.moduleName))
+
         let startNode: Node
         if (existingStartNode) {
           // Preserve existing start node position and properties
           startNode = { ...existingStartNode }
           startNode.data = {
             ...startNode.data,
-            moduleName: 'Start',
+            moduleName: startModule.name,
             connectingFrom: null,
           }
         } else {
@@ -814,7 +878,7 @@ export function translateCustomToReactFlow(
             ? { x: rootNode.position.x - 250, y: rootNode.position.y }
             : { x: 0, y: 0 }
           startNode = createNodeFromConfig(startModule.type as NodeType, startPosition, {
-            moduleName: 'Start',
+            moduleName: startModule.name,
             connectingFrom: null,
           })
         }
@@ -875,8 +939,8 @@ export function translateCustomToReactFlow(
     // This prevents breaking the layout when translating back
     const layoutResult = existingNodes && existingNodes.length > 0
       ? { nodes: reactFlowNodes, edges: reactFlowEdges } // Use nodes as-is, preserving positions
-      : autoLayout(reactFlowNodes, reactFlowEdges, rootModuleId) // Apply layout only for new graphs
-    
+      : autoLayout(reactFlowNodes, reactFlowEdges, rootModuleId, undefined) // Apply layout only for new graphs
+
     const laidOutNodes = layoutResult.nodes
     const laidOutEdges = layoutResult.edges
 
@@ -958,9 +1022,6 @@ export function validateCustomJson(customData: CustomFlowJson): {
       errors.push('dialog.modules must be an object mapping ids to modules')
     } else {
       const moduleEntries = Object.entries(dialog.modules)
-      if (moduleEntries.length === 0) {
-        errors.push('dialog.modules must contain at least one module')
-      }
 
       for (const [id, moduleDef] of moduleEntries) {
         if (!id) {
@@ -981,24 +1042,21 @@ export function validateCustomJson(customData: CustomFlowJson): {
         }
       }
 
-      // Validate handlers point to existing modules
-      const moduleIds = new Set(Object.keys(dialog.modules))
+      // Type check: handlers should be objects with string values (but don't validate references)
       for (const [id, moduleDef] of moduleEntries) {
         const handlers = (moduleDef as DialogModule).handlers || {}
         Object.entries(handlers).forEach(([key, target]) => {
           if (typeof target !== 'string' || !target) {
             errors.push(`Handler "${key}" on module "${id}" must point to a non-empty string id`)
-          } else if (!moduleIds.has(target)) {
-            errors.push(`Handler "${key}" on module "${id}" references unknown module "${target}"`)
           }
+          // Don't validate that handlers reference existing modules - just type check
         })
       }
     }
 
+    // Type check: root_module should be a string (but don't validate it exists)
     if (typeof dialog.root_module !== 'string' || !dialog.root_module) {
       errors.push('dialog.root_module must be a non-empty string')
-    } else if (!dialog.modules || !dialog.modules[dialog.root_module]) {
-      errors.push('dialog.root_module must reference an existing module id')
     }
 
     if (

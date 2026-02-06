@@ -79,7 +79,7 @@ export default function FlowCanvas({
       nodesDraggable={!isLocked}
       nodesConnectable={!isLocked}
       elementsSelectable={!isLocked}
-      deleteKeyCode={!isLocked ? 'Backspace' : undefined}
+      deleteKeyCode={undefined}
       minZoom={0.02}
       proOptions={{ hideAttribution: true }}
       elevateNodesOnSelect={false}

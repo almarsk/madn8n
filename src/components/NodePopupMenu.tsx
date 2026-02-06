@@ -1,17 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ReactFlowInstance, type Node } from 'reactflow'
 import './NodePopupMenu.css'
 import modules, { type Module } from '../modules'
-import { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES, nodeConfigs, canOutputNodeBeDeleted } from '../nodeConfigs'
+import { type NodeType, isBranchingNodeType, isBranchingOutputNodeType, NODE_TYPES, canOutputNodeBeDeleted } from '../nodeConfigs'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import CloseIcon from '@mui/icons-material/Close'
 import Tooltip from '@mui/material/Tooltip'
 
 
-// Import parseType from utils instead of duplicating
-import { parseType, displayType } from '../utils/nodeUtils'
+// Import body components
+import FlowConfigBody from './NodePopupMenu/FlowConfigBody'
+import StickerMenuBody from './NodePopupMenu/StickerMenuBody'
+import NodeParamsBody from './NodePopupMenu/NodeParamsBody'
+import BranchingNodeBody from './NodePopupMenu/BranchingNodeBody'
+import BranchingOutputBody from './NodePopupMenu/BranchingOutputBody'
 
 interface NodePopupMenuProps {
   node?: Node
@@ -49,138 +53,9 @@ interface NodePopupMenuProps {
   }) => void
   toolbarRef?: React.RefObject<HTMLDivElement>
   title?: string
+  toolbarMenuSize?: { width: number; height: number }
+  onToolbarMenuSizeChange?: (size: { width: number; height: number }) => void
 }
-
-// Helper to get default value based on type
-const getDefaultValue = (typeStr: string | undefined): any => {
-  const { base, inner } = parseType(typeStr)
-  if (base === 'number') return 0
-  if (base === 'boolean') return false
-  if (base === 'list') return []
-  if (base === 'dict') return {}
-  // For other types, use inner type if available (e.g., for list[string], inner is 'string')
-  if (inner === 'number') return 0
-  if (inner === 'boolean') return false
-  return ''
-}
-
-// Helper to render input field based on param type
-const renderParamInput = (
-  paramType: string | undefined,
-  value: any,
-  onChange: (value: any) => void
-) => {
-  const { base } = parseType(paramType)
-
-  switch (base) {
-    case 'number':
-    case 'int':
-    case 'float':
-      return (
-        <input
-          type="number"
-          value={value ?? 0}
-          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            border: '1px solid rgba(148, 163, 184, 0.7)',
-            borderRadius: '4px',
-            background: 'rgba(15, 23, 42, 0.9)',
-            color: '#e5e7eb',
-          }}
-        />
-      )
-    case 'boolean':
-    case 'bool':
-      return (
-        <input
-          type="checkbox"
-          checked={value ?? false}
-          onChange={(e) => onChange(e.target.checked)}
-          style={{
-            width: '1.2rem',
-            height: '1.2rem',
-            cursor: 'pointer',
-          }}
-        />
-      )
-    case 'list':
-      return (
-        <textarea
-          value={Array.isArray(value) ? JSON.stringify(value, null, 2) : ''}
-          onChange={(e) => {
-            try {
-              const parsed = JSON.parse(e.target.value)
-              if (Array.isArray(parsed)) {
-                onChange(parsed)
-              }
-            } catch {
-              // Invalid JSON, ignore
-            }
-          }}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            border: '1px solid rgba(148, 163, 184, 0.7)',
-            borderRadius: '4px',
-            background: 'rgba(15, 23, 42, 0.9)',
-            color: '#e5e7eb',
-            fontFamily: 'monospace',
-            fontSize: '0.85rem',
-            minHeight: '80px',
-            resize: 'vertical',
-          }}
-        />
-      )
-    case 'dict':
-      return (
-        <textarea
-          value={typeof value === 'object' && value !== null && !Array.isArray(value) ? JSON.stringify(value, null, 2) : '{}'}
-          onChange={(e) => {
-            try {
-              const parsed = JSON.parse(e.target.value)
-              if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-                onChange(parsed)
-              }
-            } catch {
-              // Invalid JSON, ignore
-            }
-          }}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            border: '1px solid rgba(148, 163, 184, 0.7)',
-            borderRadius: '4px',
-            background: 'rgba(15, 23, 42, 0.9)',
-            color: '#e5e7eb',
-            fontFamily: 'monospace',
-            fontSize: '0.85rem',
-            minHeight: '80px',
-            resize: 'vertical',
-          }}
-        />
-      )
-    case 'string':
-    default:
-      return (
-        <input
-          type="text"
-          value={value ?? ''}
-          onChange={(e) => onChange(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            border: '1px solid rgba(148, 163, 184, 0.7)',
-            borderRadius: '4px',
-            background: 'rgba(15, 23, 42, 0.9)',
-            color: '#e5e7eb',
-          }}
-        />
-      )
-  }
-}
-
 
 export default function NodePopupMenu({
   node,
@@ -200,6 +75,8 @@ export default function NodePopupMenu({
   toolbarRef,
   title,
   stickers,
+  toolbarMenuSize,
+  onToolbarMenuSizeChange,
 }: NodePopupMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
@@ -208,13 +85,39 @@ export default function NodePopupMenu({
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-  const [menuSize, setMenuSize] = useState({ width: 360, height: 180 })
+  // Default menu height: 2/3 of toolbar height for toolbar menus (flow config, sticker menu), otherwise 180
+  const getDefaultMenuHeight = useCallback(() => {
+    if ((isFlowConfig || isStickerMenu) && toolbarRef?.current) {
+      const toolbarHeight = toolbarRef.current.getBoundingClientRect().height
+      return Math.round(toolbarHeight * (2 / 3))
+    }
+    return 180
+  }, [isFlowConfig, isStickerMenu, toolbarRef])
+
+  // For toolbar menus, use persisted size; otherwise use default
+  const getInitialMenuSize = useCallback(() => {
+    if ((isFlowConfig || isStickerMenu) && toolbarMenuSize) {
+      return toolbarMenuSize
+    }
+    return { width: 360, height: getDefaultMenuHeight() }
+  }, [isFlowConfig, isStickerMenu, toolbarMenuSize, getDefaultMenuHeight])
+
+  const [menuSize, setMenuSize] = useState(getInitialMenuSize)
+
+  // Update menu size when toolbar menu size changes (for toolbar menus)
+  useEffect(() => {
+    if ((isFlowConfig || isStickerMenu) && toolbarMenuSize) {
+      setMenuSize(toolbarMenuSize)
+    }
+  }, [isFlowConfig, isStickerMenu, toolbarMenuSize])
   const questionMarkRef = useRef<HTMLButtonElement | null>(null)
   const nodeType = node ? ((node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType) : undefined
   const module = node?.data?.moduleName ? modules.find((m: Module) => m.name === node.data.moduleName) : undefined
 
   // Track if user has manually positioned the menu
   const userPositionedRef = useRef(!!initialPosition)
+  // Track if user has manually resized toolbar menus
+  const hasManualHeightRef = useRef(false)
 
   // Initialize params state from node data (only for node config)
   const [params, setParams] = useState<Record<string, any>>(node?.data?.params || {})
@@ -259,9 +162,17 @@ export default function NodePopupMenu({
   useEffect(() => {
     // Update params when node data changes (only for node config)
     if (!isFlowConfig && node) {
-      setParams(node.data?.params || {})
+      const nodeParams = node.data?.params || {}
+      // Only update if the params actually changed (deep comparison via JSON)
+      // This prevents unnecessary updates and ensures dropdown stays in sync
+      const prevParamsStr = JSON.stringify(params)
+      const nodeParamsStr = JSON.stringify(nodeParams)
+      if (prevParamsStr !== nodeParamsStr) {
+        setParams(nodeParams)
+      }
     }
-  }, [node?.data.params, isFlowConfig])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node?.id, node?.data?.params, isFlowConfig])
 
   // Track if position update is needed (prevent updates during undo/redo)
   const shouldUpdatePositionRef = useRef(true)
@@ -468,8 +379,8 @@ export default function NodePopupMenu({
       const maxX = viewportWidth - menuWidth - margin
       const maxY = viewportHeight - menuHeight - margin
 
-      let constrainedX = Math.max(minX, Math.min(maxX, position.x))
-      let constrainedY = Math.max(minY, Math.min(maxY, position.y))
+      const constrainedX = Math.max(minX, Math.min(maxX, position.x))
+      const constrainedY = Math.max(minY, Math.min(maxY, position.y))
 
       if (constrainedX !== position.x || constrainedY !== position.y) {
         const newPosition = { x: constrainedX, y: constrainedY }
@@ -495,7 +406,7 @@ export default function NodePopupMenu({
     userPositionedRef.current = true
 
     const handleMouseMove = (e: MouseEvent) => {
-      let newPosition = {
+      const newPosition = {
         x: e.clientX - dragOffset.x,
         y: e.clientY - dragOffset.y,
       }
@@ -706,13 +617,22 @@ export default function NodePopupMenu({
       nextHeight = Math.min(nextHeight, maxHeight)
       nextWidth = Math.min(nextWidth, maxWidth)
 
-      setMenuSize({ width: nextWidth, height: nextHeight })
+      const newSize = { width: nextWidth, height: nextHeight }
+      setMenuSize(newSize)
+      // Update shared toolbar menu size state for toolbar menus
+      if ((isFlowConfig || isStickerMenu) && onToolbarMenuSizeChange) {
+        onToolbarMenuSizeChange(newSize)
+      }
     }
 
     const handleMouseUp = () => {
       // Mark resize as just ended so the next outside click doesn't immediately close the menu
       isResizingRef.current = false
       resizeJustEndedRef.current = true
+      // Mark that user has manually set the height (for toolbar menus)
+      if (isFlowConfig || isStickerMenu) {
+        hasManualHeightRef.current = true
+      }
       setTimeout(() => {
         resizeJustEndedRef.current = false
       }, 150)
@@ -892,934 +812,48 @@ export default function NodePopupMenu({
         </div>
       </div>
       <div className="node-popup-menu-content" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-        {/* Sticker Management Menu - Show only sticker management */}
+        {/* Sticker Management Menu */}
         {isStickerMenu && (
-          <div style={{ padding: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0, color: 'rgba(226, 232, 240, 0.9)', fontSize: '1rem', fontWeight: 600 }}>
-                Stickers
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  // Generate a new sticker ID
-                  const newId = `S${Object.keys(metadata.stickers || {}).length + 1}`
-                  const updated = {
-                    ...metadata,
-                    stickers: {
-                      ...metadata.stickers,
-                      [newId]: {
-                        name: 'default',
-                        description: '',
-                        appearance: { color: '#fceaea' },
-                      },
-                    },
-                  }
-                  setMetadata(updated)
-                  if (onFlowMetadataUpdate) {
-                    onFlowMetadataUpdate(updated)
-                  }
-                }}
-                style={{
-                  padding: '0.375rem 0.75rem',
-                  border: '1px solid rgba(148, 163, 184, 0.7)',
-                  borderRadius: '4px',
-                  background: 'rgba(30, 41, 59, 0.9)',
-                  color: '#e5e7eb',
-                  cursor: 'pointer',
-                  fontSize: '0.875rem',
-                  fontWeight: 500,
-                }}
-              >
-                + Add Sticker
-              </button>
-            </div>
-            {metadata.stickers && Object.keys(metadata.stickers).length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {Object.entries(metadata.stickers).map(([id, sticker]: [string, any]) => (
-                  <div
-                    key={id}
-                    style={{
-                      padding: '0.75rem',
-                      border: '1px solid rgba(148, 163, 184, 0.3)',
-                      borderRadius: '4px',
-                      background: 'rgba(30, 41, 59, 0.5)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                      <div style={{ flex: 1 }}>
-                        <input
-                          type="text"
-                          value={sticker.name || ''}
-                          onChange={(e) => {
-                            const updated = {
-                              ...metadata,
-                              stickers: {
-                                ...metadata.stickers,
-                                [id]: {
-                                  ...sticker,
-                                  name: e.target.value,
-                                },
-                              },
-                            }
-                            setMetadata(updated)
-                            if (onFlowMetadataUpdate) {
-                              onFlowMetadataUpdate(updated)
-                            }
-                          }}
-                          placeholder="Sticker name"
-                          style={{
-                            width: '100%',
-                            padding: '0.375rem 0.5rem',
-                            border: '1px solid rgba(148, 163, 184, 0.5)',
-                            borderRadius: '4px',
-                            background: 'rgba(15, 23, 42, 0.9)',
-                            color: '#e5e7eb',
-                            fontSize: '0.875rem',
-                            marginBottom: '0.5rem',
-                          }}
-                        />
-                        <textarea
-                          value={sticker.description || ''}
-                          onChange={(e) => {
-                            const updated = {
-                              ...metadata,
-                              stickers: {
-                                ...metadata.stickers,
-                                [id]: {
-                                  ...sticker,
-                                  description: e.target.value,
-                                },
-                              },
-                            }
-                            setMetadata(updated)
-                            if (onFlowMetadataUpdate) {
-                              onFlowMetadataUpdate(updated)
-                            }
-                          }}
-                          placeholder="Description (optional)"
-                          style={{
-                            width: '100%',
-                            padding: '0.375rem 0.5rem',
-                            border: '1px solid rgba(148, 163, 184, 0.5)',
-                            borderRadius: '4px',
-                            background: 'rgba(15, 23, 42, 0.9)',
-                            color: '#e5e7eb',
-                            fontSize: '0.875rem',
-                            minHeight: '50px',
-                            resize: 'vertical',
-                            fontFamily: 'inherit',
-                          }}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = { ...metadata }
-                          const newStickers = { ...updated.stickers }
-                          delete newStickers[id]
-                          updated.stickers = newStickers
-                          setMetadata(updated)
-                          if (onFlowMetadataUpdate) {
-                            onFlowMetadataUpdate(updated)
-                          }
-                        }}
-                        style={{
-                          marginLeft: '0.5rem',
-                          padding: '0.25rem 0.5rem',
-                          border: '1px solid rgba(239, 68, 68, 0.5)',
-                          borderRadius: '4px',
-                          background: 'rgba(239, 68, 68, 0.1)',
-                          color: '#fca5a5',
-                          cursor: 'pointer',
-                          fontSize: '0.75rem',
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <label style={{ color: 'rgba(226, 232, 240, 0.9)', fontSize: '0.875rem' }}>
-                        Color:
-                      </label>
-                      <input
-                        type="color"
-                        value={sticker.appearance?.color || '#fceaea'}
-                        onChange={(e) => {
-                          const updated = {
-                            ...metadata,
-                            stickers: {
-                              ...metadata.stickers,
-                              [id]: {
-                                ...sticker,
-                                appearance: {
-                                  ...sticker.appearance,
-                                  color: e.target.value,
-                                },
-                              },
-                            },
-                          }
-                          setMetadata(updated)
-                          if (onFlowMetadataUpdate) {
-                            onFlowMetadataUpdate(updated)
-                          }
-                        }}
-                        style={{
-                          width: '40px',
-                          height: '30px',
-                          border: '1px solid rgba(148, 163, 184, 0.5)',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                        }}
-                      />
-                      <input
-                        type="text"
-                        value={sticker.appearance?.color || '#fceaea'}
-                        onChange={(e) => {
-                          const updated = {
-                            ...metadata,
-                            stickers: {
-                              ...metadata.stickers,
-                              [id]: {
-                                ...sticker,
-                                appearance: {
-                                  ...sticker.appearance,
-                                  color: e.target.value,
-                                },
-                              },
-                            },
-                          }
-                          setMetadata(updated)
-                          if (onFlowMetadataUpdate) {
-                            onFlowMetadataUpdate(updated)
-                          }
-                        }}
-                        placeholder="#fceaea"
-                        style={{
-                          flex: 1,
-                          padding: '0.375rem 0.5rem',
-                          border: '1px solid rgba(148, 163, 184, 0.5)',
-                          borderRadius: '4px',
-                          background: 'rgba(15, 23, 42, 0.9)',
-                          color: '#e5e7eb',
-                          fontSize: '0.875rem',
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p style={{ padding: '0.5rem', color: 'rgba(148, 163, 184, 0.8)', fontSize: '0.875rem' }}>
-                No stickers defined. Click "Add Sticker" to create one.
-              </p>
-            )}
-          </div>
+          <StickerMenuBody metadata={metadata} setMetadata={setMetadata} onFlowMetadataUpdate={onFlowMetadataUpdate} />
         )}
 
         {/* Flow Config Menu */}
         {isFlowConfig && !isStickerMenu && (
-          <div style={{ padding: '1rem' }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{
-                display: 'block',
-                marginBottom: '0.5rem',
-                color: 'rgba(226, 232, 240, 0.9)',
-                fontSize: '0.875rem',
-                fontWeight: 500
-              }}>
-                Name
-              </label>
-              <input
-                type="text"
-                value={metadata.name}
-                onChange={(e) => {
-                  const updated = { ...metadata, name: e.target.value }
-                  setMetadata(updated)
-                  if (onFlowMetadataUpdate) {
-                    onFlowMetadataUpdate(updated)
-                  }
-                }}
-                placeholder="Enter flow name..."
-                style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  border: '1px solid rgba(148, 163, 184, 0.7)',
-                  borderRadius: '4px',
-                  background: 'rgba(15, 23, 42, 0.9)',
-                  color: '#e5e7eb',
-                  fontSize: '0.875rem',
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{
-                display: 'block',
-                marginBottom: '0.5rem',
-                color: 'rgba(226, 232, 240, 0.9)',
-                fontSize: '0.875rem',
-                fontWeight: 500
-              }}>
-                Description
-              </label>
-              <textarea
-                value={metadata.description}
-                onChange={(e) => {
-                  const updated = { ...metadata, description: e.target.value }
-                  setMetadata(updated)
-                  if (onFlowMetadataUpdate) {
-                    onFlowMetadataUpdate(updated)
-                  }
-                }}
-                placeholder="Enter flow description..."
-                style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  border: '1px solid rgba(148, 163, 184, 0.7)',
-                  borderRadius: '4px',
-                  background: 'rgba(15, 23, 42, 0.9)',
-                  color: '#e5e7eb',
-                  fontSize: '0.875rem',
-                  minHeight: '60px',
-                  resize: 'vertical',
-                  fontFamily: 'inherit',
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{
-                display: 'block',
-                marginBottom: '0.5rem',
-                color: 'rgba(226, 232, 240, 0.9)',
-                fontSize: '0.875rem',
-                fontWeight: 500
-              }}>
-                Language
-              </label>
-              <select
-                value={metadata.language}
-                onChange={(e) => {
-                  const updated = { ...metadata, language: e.target.value }
-                  setMetadata(updated)
-                  if (onFlowMetadataUpdate) {
-                    onFlowMetadataUpdate(updated)
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  padding: '0.5rem 1.75rem 0.5rem 0.5rem',
-                  border: '1px solid rgba(148, 163, 184, 0.7)',
-                  borderRadius: '4px',
-                  background: 'rgba(15, 23, 42, 0.9)',
-                  color: '#e5e7eb',
-                  fontSize: '0.875rem',
-                  appearance: 'none',
-                  WebkitAppearance: 'none',
-                  MozAppearance: 'none',
-                }}
-              >
-                <option value="">Select language…</option>
-                <option value="cs">cs</option>
-                <option value="en">en</option>
-                <option value="de">de</option>
-              </select>
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{
-                display: 'block',
-                marginBottom: '0.5rem',
-                color: 'rgba(226, 232, 240, 0.9)',
-                fontSize: '0.875rem',
-                fontWeight: 500
-              }}>
-                MChannels Bot ID
-              </label>
-              <input
-                type="text"
-                value={metadata.mchannels_bot_id}
-                onChange={(e) => {
-                  const updated = { ...metadata, mchannels_bot_id: e.target.value }
-                  setMetadata(updated)
-                  if (onFlowMetadataUpdate) {
-                    onFlowMetadataUpdate(updated)
-                  }
-                }}
-                placeholder="Enter mchannels bot ID..."
-                style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  border: '1px solid rgba(148, 163, 184, 0.7)',
-                  borderRadius: '4px',
-                  background: 'rgba(15, 23, 42, 0.9)',
-                  color: '#e5e7eb',
-                  fontSize: '0.875rem',
-                }}
-              />
-            </div>
-
-            {/* Omnichannel config – voice, TTS, STT as individual fields */}
-            {(() => {
-              const omni = metadata.omnichannel_config || {}
-              const voice = omni.voice || {}
-              const tts = voice.tts || {}
-              const prosody = tts.prosody || {}
-              const stt = voice.stt || {}
-
-              const updateOmnichannel = (updater: (current: any) => any) => {
-                const current = metadata.omnichannel_config || {}
-                const updatedOmni = updater(current)
-                const updated = { ...metadata, omnichannel_config: updatedOmni }
-                setMetadata(updated)
-                if (onFlowMetadataUpdate) {
-                  onFlowMetadataUpdate(updated)
-                }
-              }
-
-              return (
-                <>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '0.5rem',
-                      color: 'rgba(226, 232, 240, 0.9)',
-                      fontSize: '0.875rem',
-                      fontWeight: 500
-                    }}>
-                      Voice initial user response timeout
-                    </label>
-                    <input
-                      type="number"
-                      step={100}
-                      value={voice.initial_user_response_timeout ?? ''}
-                      onChange={(e) => {
-                        const value = e.target.value === '' ? '' : Number(e.target.value)
-                        updateOmnichannel((current) => {
-                          const v = current.voice || {}
-                          return {
-                            ...current,
-                            voice: {
-                              ...v,
-                              initial_user_response_timeout: value,
-                            },
-                          }
-                        })
-                      }}
-                      placeholder="e.g. 1800"
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem',
-                        border: '1px solid rgba(148, 163, 184, 0.7)',
-                        borderRadius: '4px',
-                        background: 'rgba(15, 23, 42, 0.9)',
-                        color: '#e5e7eb',
-                        fontSize: '0.875rem',
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '0.5rem',
-                      color: 'rgba(226, 232, 240, 0.9)',
-                      fontSize: '0.875rem',
-                      fontWeight: 500
-                    }}>
-                      Voice inactivity timeout
-                    </label>
-                    <input
-                      type="number"
-                      step={100}
-                      value={voice.inactivity_timeout ?? ''}
-                      onChange={(e) => {
-                        const value = e.target.value === '' ? '' : Number(e.target.value)
-                        updateOmnichannel((current) => {
-                          const v = current.voice || {}
-                          return {
-                            ...current,
-                            voice: {
-                              ...v,
-                              inactivity_timeout: value,
-                            },
-                          }
-                        })
-                      }}
-                      placeholder="e.g. 4000"
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem',
-                        border: '1px solid rgba(148, 163, 184, 0.7)',
-                        borderRadius: '4px',
-                        background: 'rgba(15, 23, 42, 0.9)',
-                        color: '#e5e7eb',
-                        fontSize: '0.875rem',
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '0.5rem',
-                      color: 'rgba(226, 232, 240, 0.9)',
-                      fontSize: '0.875rem',
-                      fontWeight: 500
-                    }}>
-                      TTS voice
-                    </label>
-                    <select
-                      value={tts.voice ?? ''}
-                      onChange={(e) => {
-                        const value = e.target.value
-                        updateOmnichannel((current) => {
-                          const v = current.voice || {}
-                          const t = v.tts || {}
-                          return {
-                            ...current,
-                            voice: {
-                              ...v,
-                              tts: {
-                                ...t,
-                                voice: value,
-                              },
-                            },
-                          }
-                        })
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem 1.75rem 0.5rem 0.5rem',
-                        border: '1px solid rgba(148, 163, 184, 0.7)',
-                        borderRadius: '4px',
-                        background: 'rgba(15, 23, 42, 0.9)',
-                        color: '#e5e7eb',
-                        fontSize: '0.875rem',
-                        appearance: 'none',
-                        WebkitAppearance: 'none',
-                        MozAppearance: 'none',
-                      }}
-                    >
-                      <option value="">Select TTS voice…</option>
-                      <option value="cs-CZ_TomasU8">cs-CZ_TomasU8</option>
-                      <option value="cs-CZ_JanaU8">cs-CZ_JanaU8</option>
-                      <option value="en-US_Alloy">en-US_Alloy</option>
-                    </select>
-                  </div>
-
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '0.5rem',
-                      color: 'rgba(226, 232, 240, 0.9)',
-                      fontSize: '0.875rem',
-                      fontWeight: 500
-                    }}>
-                      TTS provider
-                    </label>
-                    <select
-                      value={tts.provider ?? ''}
-                      onChange={(e) => {
-                        const value = e.target.value
-                        updateOmnichannel((current) => {
-                          const v = current.voice || {}
-                          const t = v.tts || {}
-                          return {
-                            ...current,
-                            voice: {
-                              ...v,
-                              tts: {
-                                ...t,
-                                provider: value,
-                              },
-                            },
-                          }
-                        })
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem 1.75rem 0.5rem 0.5rem',
-                        border: '1px solid rgba(148, 163, 184, 0.7)',
-                        borderRadius: '4px',
-                        background: 'rgba(15, 23, 42, 0.9)',
-                        color: '#e5e7eb',
-                        fontSize: '0.875rem',
-                        appearance: 'none',
-                        WebkitAppearance: 'none',
-                        MozAppearance: 'none',
-                      }}
-                    >
-                      <option value="">Select TTS provider…</option>
-                      <option value="mvoice">mvoice</option>
-                      <option value="azure">azure</option>
-                    </select>
-                  </div>
-
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '0.5rem',
-                      color: 'rgba(226, 232, 240, 0.9)',
-                      fontSize: '0.875rem',
-                      fontWeight: 500
-                    }}>
-                      TTS prosody rate
-                    </label>
-                    {(() => {
-                      const rawRate = typeof prosody.rate === 'string' ? prosody.rate : '100%'
-                      const match = rawRate.match(/(\d+)/)
-                      const rateNumber = match ? Number(match[1]) : 100
-                      const clamped = Math.min(150, Math.max(50, rateNumber || 100))
-                      return (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                          <input
-                            type="range"
-                            min={50}
-                            max={150}
-                            step={5}
-                            value={clamped}
-                            onChange={(e) => {
-                              const value = Number(e.target.value)
-                              const rateString = `${value}%`
-                              updateOmnichannel((current) => {
-                                const v = current.voice || {}
-                                const t = v.tts || {}
-                                const p = t.prosody || {}
-                                return {
-                                  ...current,
-                                  voice: {
-                                    ...v,
-                                    tts: {
-                                      ...t,
-                                      prosody: {
-                                        ...p,
-                                        rate: rateString,
-                                      },
-                                    },
-                                  },
-                                }
-                              })
-                            }}
-                            style={{ flex: 1 }}
-                          />
-                          <span style={{ minWidth: '3rem', textAlign: 'right', fontSize: '0.8rem', color: '#e5e7eb' }}>
-                            {clamped}%
-                          </span>
-                        </div>
-                      )
-                    })()}
-                  </div>
-
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '0.5rem',
-                      color: 'rgba(226, 232, 240, 0.9)',
-                      fontSize: '0.875rem',
-                      fontWeight: 500
-                    }}>
-                      STT provider
-                    </label>
-                    <select
-                      value={stt.provider ?? ''}
-                      onChange={(e) => {
-                        const value = e.target.value
-                        updateOmnichannel((current) => {
-                          const v = current.voice || {}
-                          const s = v.stt || {}
-                          return {
-                            ...current,
-                            voice: {
-                              ...v,
-                              stt: {
-                                ...s,
-                                provider: value,
-                              },
-                            },
-                          }
-                        })
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem 1.75rem 0.5rem 0.5rem',
-                        border: '1px solid rgba(148, 163, 184, 0.7)',
-                        borderRadius: '4px',
-                        background: 'rgba(15, 23, 42, 0.9)',
-                        color: '#e5e7eb',
-                        fontSize: '0.875rem',
-                        appearance: 'none',
-                        WebkitAppearance: 'none',
-                        MozAppearance: 'none',
-                      }}
-                    >
-                      <option value="">Select STT provider…</option>
-                      <option value="azure">azure</option>
-                      <option value="mvoice">mvoice</option>
-                    </select>
-                  </div>
-                </>
-              )
-            })()}
-          </div>
+          <FlowConfigBody metadata={metadata} setMetadata={setMetadata} onFlowMetadataUpdate={onFlowMetadataUpdate} />
         )}
 
         {/* Single Node Menu - Show all params (with special handling for sticker params) */}
         {!isFlowConfig && nodeType && !isBranchingNodeType(nodeType) && !isBranchingOutputNodeType(nodeType) && module && (
-          <div style={{ padding: '1rem' }}>
-            {module.params.map((param) => {
-              const defaultValue = getDefaultValue(param.type)
-              // Default to obligatory if not specified (backwards compatibility)
-              const isObligatory = param.obligatory !== false
-              const currentValue = params[param.name] ?? defaultValue
-              const isEmpty = currentValue === null || currentValue === undefined || currentValue === '' ||
-                (Array.isArray(currentValue) && currentValue.length === 0) ||
-                (typeof currentValue === 'object' && !Array.isArray(currentValue) && Object.keys(currentValue).length === 0)
-              const hasError = isObligatory && isEmpty
-
-              // Special UI for "sticker type" param:
-              // render a single-select dropdown bound to stickers defined in the toolbar menu.
-              // We key this off the param type/name so any module can expose a sticker selector.
-              if (
-                param.type === 'stickers' ||
-                param.name === 'stickers' ||
-                param.name === 'sticker_type' ||
-                param.name === 'stickerType'
-              ) {
-                const availableStickers =
-                  stickers ||
-                  flowMetadata?.stickers ||
-                  metadata.stickers ||
-                  {}
-
-                const selectedArray = Array.isArray(currentValue) ? currentValue : []
-                const selected = selectedArray[0] ?? ''
-
-                return (
-                  <div key={param.name} style={{ marginBottom: '0.75rem' }}>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '0.375rem',
-                      color: hasError ? 'rgba(239, 68, 68, 0.9)' : 'rgba(226, 232, 240, 0.9)',
-                      fontSize: '0.875rem',
-                      fontWeight: 500
-                    }}>
-                      Sticker type
-                      {isObligatory && <span style={{ color: 'rgba(239, 68, 68, 0.8)', marginLeft: '0.25rem' }}>*</span>}
-                    </label>
-                    <select
-                      value={selected}
-                      onChange={(e) => {
-                        const nextValue = e.target.value
-                        const arrayValue = nextValue ? [nextValue] : []
-                        // Store under the configured param name
-                        handleParamChange(param.name, arrayValue)
-                        // Also mirror to "stickers" key so label/color logic works even if the param
-                        // is named differently (e.g. "sticker_type") in module definitions.
-                        if (param.name !== 'stickers') {
-                          handleParamChange('stickers', arrayValue)
-                        }
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem 1.75rem 0.5rem 0.5rem',
-                        border: '1px solid rgba(148, 163, 184, 0.7)',
-                        borderRadius: '4px',
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        color: '#e5e7eb',
-                        fontSize: '0.875rem',
-                        appearance: 'none',
-                        WebkitAppearance: 'none',
-                        MozAppearance: 'none',
-                      }}
-                    >
-                      <option value="">Select sticker…</option>
-                      {Object.entries(availableStickers).map(([id, sticker]: [string, any]) => (
-                        <option key={id} value={id}>
-                          {(sticker as any).name || id}
-                        </option>
-                      ))}
-                    </select>
-                    {onOpenStickerMenu && (
-                      <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onOpenStickerMenu()
-                          }}
-                          style={{
-                            padding: '0.375rem 0.75rem',
-                            borderRadius: '4px',
-                            border: '1px solid rgba(148, 163, 184, 0.7)',
-                            background: 'rgba(30, 41, 59, 0.9)',
-                            color: '#e5e7eb',
-                            fontSize: '0.75rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Manage stickers…
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )
-              }
-
-              // Default rendering for all other params
-              return (
-                <div key={param.name} style={{ marginBottom: '0.75rem' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '0.375rem',
-                    color: hasError ? 'rgba(239, 68, 68, 0.9)' : 'rgba(226, 232, 240, 0.9)',
-                    fontSize: '0.875rem',
-                    fontWeight: 500
-                  }}>
-                    {param.name}
-                    {isObligatory && <span style={{ color: 'rgba(239, 68, 68, 0.8)', marginLeft: '0.25rem' }}>*</span>}
-                    {param.type ? ` (${displayType(param.type)})` : ''}
-                  </label>
-                  {renderParamInput(
-                    param.type,
-                    params[param.name] ?? defaultValue,
-                    (value) => handleParamChange(param.name, value)
-                  )}
-                </div>
-              )
-            })}
-            {module.params.length === 0 && (
-              <p style={{ padding: '0.5rem', color: 'rgba(148, 163, 184, 0.8)', fontSize: '0.875rem' }}>
-                No parameters configured
-              </p>
-            )}
-          </div>
+          <NodeParamsBody
+            module={module}
+            params={params}
+            handleParamChange={handleParamChange}
+            stickers={stickers}
+            flowMetadata={flowMetadata}
+            metadata={metadata}
+            onOpenStickerMenu={onOpenStickerMenu}
+          />
         )}
 
         {/* Branching Node Menu - Show params only (output count determined by config) */}
-        {!isFlowConfig && nodeType && isBranchingNodeType(nodeType) && module && (
-          <div style={{ padding: '1rem' }}>
-            {/* Show module params - hide listParam if it's used for outputs */}
-            {module.params.map((param) => {
-              // Skip listParam if it's used for outputs
-              if (module.outputConfig?.type === 'listParam' &&
-                module.outputConfig.listParamName === param.name) {
-                return null
-              }
-
-              const defaultValue = getDefaultValue(param.type)
-              // Default to obligatory if not specified (backwards compatibility)
-              const isObligatory = param.obligatory !== false
-              const currentValue = params[param.name] ?? defaultValue
-              const isEmpty = currentValue === null || currentValue === undefined || currentValue === '' ||
-                (Array.isArray(currentValue) && currentValue.length === 0) ||
-                (typeof currentValue === 'object' && !Array.isArray(currentValue) && Object.keys(currentValue).length === 0)
-              const hasError = isObligatory && isEmpty
-
-              return (
-                <div key={param.name} style={{ marginBottom: '0.75rem' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '0.375rem',
-                    color: hasError ? 'rgba(239, 68, 68, 0.9)' : 'rgba(226, 232, 240, 0.9)',
-                    fontSize: '0.875rem',
-                    fontWeight: 500
-                  }}>
-                    {param.name}
-                    {isObligatory && <span style={{ color: 'rgba(239, 68, 68, 0.8)', marginLeft: '0.25rem' }}>*</span>}
-                    {param.type ? ` (${displayType(param.type)})` : ''}
-                  </label>
-                  {renderParamInput(
-                    param.type,
-                    params[param.name] ?? defaultValue,
-                    (value) => handleParamChange(param.name, value)
-                  )}
-                </div>
-              )
-            })}
-
-            {/* Add output button for listParam type */}
-            {module.outputConfig?.type === 'listParam' && onAddOutput && (
-              <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(148, 163, 184, 0.2)' }}>
-                <button
-                  type="button"
-                  onClick={() => node && onAddOutput && onAddOutput(node.id)}
-                  style={{
-                    width: '100%',
-                    padding: '0.5rem',
-                    border: '1px solid rgba(148, 163, 184, 0.7)',
-                    borderRadius: '4px',
-                    background: 'rgba(15, 23, 42, 0.9)',
-                    color: '#e5e7eb',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    fontWeight: 500,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.5rem',
-                    transition: 'all 0.2s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(30, 64, 175, 0.3)'
-                    e.currentTarget.style.borderColor = 'rgba(96, 165, 250, 0.6)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(15, 23, 42, 0.9)'
-                    e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.7)'
-                  }}
-                >
-                  <span>+</span>
-                  <span>Add Output</span>
-                </button>
-              </div>
-            )}
-          </div>
+        {!isFlowConfig && nodeType && isBranchingNodeType(nodeType) && module && node && (
+          <BranchingNodeBody
+            node={node}
+            module={module}
+            params={params}
+            handleParamChange={handleParamChange}
+            onAddOutput={onAddOutput}
+          />
         )}
 
         {/* Branching Output Node Menu - only show for listParam type, not internal */}
         {!isFlowConfig && nodeType && isBranchingOutputNodeType(nodeType) && node && module && module.outputConfig && module.outputConfig.type === 'listParam' && (
-          <div style={{ padding: '0.75rem' }}>
-            {(() => {
-              const listParamName = module.outputConfig.type === 'listParam' ? module.outputConfig.listParamName : undefined
-              const listParam = listParamName ? module.params.find(p => p.name === listParamName) : undefined
-              if (listParam) {
-                // Output node value is always obligatory when linked to param
-                const isObligatory = true
-                const currentValue = params.value ?? ''
-                const isEmpty = currentValue === null || currentValue === undefined || currentValue === ''
-                const hasError = isObligatory && isEmpty
-
-                return (
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '0.375rem',
-                      color: hasError ? 'rgba(239, 68, 68, 0.9)' : 'rgba(226, 232, 240, 0.9)',
-                      fontSize: '0.875rem',
-                      fontWeight: 500
-                    }}>
-                      Value
-                      <span style={{ color: 'rgba(239, 68, 68, 0.8)', marginLeft: '0.25rem' }}>*</span>
-                      {(() => {
-                        // For output nodes, show only the element type, not "list[...]"
-                        const { inner } = parseType(listParam.type)
-                        const elementType = inner || 'str' // Show element type, fallback to str
-                        return elementType ? ` (${displayType(elementType)})` : ''
-                      })()}
-                    </label>
-                    {(() => {
-                      // Use the element type for the input
-                      const { inner } = parseType(listParam.type)
-                      const inputType = inner || 'str'
-                      return renderParamInput(inputType, params.value ?? '', handleOutputValueChange)
-                    })()}
-                  </div>
-                )
-              }
-              return null
-            })()}
-          </div>
+          <BranchingOutputBody
+            node={node}
+            module={module}
+            params={params}
+            handleOutputValueChange={handleOutputValueChange}
+          />
         )}
 
         {/* Fallback for nodes without module (only for node config, not flow config) */}

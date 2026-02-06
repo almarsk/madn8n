@@ -24,6 +24,8 @@ export type OutputConfig =
     }
 
 export interface Module {
+    // Export name - used in JSON export and for identifying modules
+    // This is the canonical name for the module (e.g., "Type 1", "Branching", "Exit")
     name: string
     type: ModuleType
     description: string
@@ -36,7 +38,7 @@ export interface Module {
     outputLabels?: string[]
     // Documentation string for the module (displayed as tooltip)
     documentation?: string
-    // Default handlers for this module (e.g., "node_exit" for single nodes, "on_0", "on_1" for branching)
+    // Default handlers for this module (e.g., "on_1" for Type 1, "node_exit" for other single nodes, "on_0", "on_1" for branching)
     handlers?: string[]
     // Source configuration (optional)
     source?: {
@@ -98,7 +100,6 @@ const defaultModules: Module[] = [
             "type": "listParam",
             "listParamName": "outputs"
         },
-        "handlers": ["on_0", "on_1"],
         "source": {
             "path": "",
             "unpack_params": true
@@ -130,7 +131,7 @@ const defaultModules: Module[] = [
         "description": "Sticker node for visual organization",
         "params": [
             {
-                "name": "sticker type",
+                "name": "stickerz",
                 "type": "stickers",
                 "obligatory": true
             }
@@ -144,7 +145,7 @@ const defaultModules: Module[] = [
         "documentation": "Sticker node for visual organization with color coding"
     },
     {
-        "name": "End",
+        "name": "Exit",
         "type": "inputOnly",
         "description": "End node - exit point of the flow",
         "params": [],
@@ -217,7 +218,7 @@ let modules: Module[] = [...defaultModules]
  * Download additional modules from server (placeholder for future implementation)
  * @param mchannelsBotId - The mchannels bot ID to fetch modules for
  */
-export async function downloadModules(mchannelsBotId: string): Promise<Module[]> {
+export async function downloadModules(_mchannelsBotId: string): Promise<Module[]> {
     // TODO: Implement actual API call to fetch modules
     // For now, return empty array
     // Example:
@@ -225,7 +226,7 @@ export async function downloadModules(mchannelsBotId: string): Promise<Module[]>
     // const data = await response.json()
     // return data.modules as Module[]
 
-    console.log('downloadModules called with mchannels_bot_id:', mchannelsBotId)
+    // TODO: Implement actual API call
     return []
 }
 

@@ -8,7 +8,6 @@ import ContentPasteIcon from '@mui/icons-material/ContentPaste'
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz'
 import './JsonEditor.css'
 import { translateCustomToReactFlow, validateCustomJson, type CustomFlowJson } from '../utils/translationHelpers'
-import { exportFlowToJson } from '../utils/exportHelpers'
 import { translateReactFlowToCustom, type CustomFlowMetadata } from '../utils/translationHelpers'
 
 interface JsonEditorProps {
@@ -288,40 +287,73 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
       const parsed = JSON.parse(jsonText)
       
       if (jsonFormat === 'custom') {
-        const validation = validateCustomJson(parsed as CustomFlowJson)
-        
-        if (!validation.isValid) {
+        // Only check basic type structure, not full validation
+        // Full validation is done by the Validate JSON button
+        if (!parsed || typeof parsed !== 'object') {
           setValidationResult({
             isValid: false,
-            message: `Cannot save: Validation errors:\n${validation.errors.join('\n')}`,
+            message: 'Cannot save: Invalid JSON structure',
+          })
+          return
+        }
+        
+        if (!parsed.current_bot_version || typeof parsed.current_bot_version !== 'object') {
+          setValidationResult({
+            isValid: false,
+            message: 'Cannot save: Missing or invalid current_bot_version',
+          })
+          return
+        }
+        
+        if (!parsed.current_bot_version.dialog || typeof parsed.current_bot_version.dialog !== 'object') {
+          setValidationResult({
+            isValid: false,
+            message: 'Cannot save: Missing or invalid dialog',
           })
           return
         }
 
-        const { reactFlowData, metadata } = translateCustomToReactFlow(
-          parsed as CustomFlowJson,
-          currentNodes,
-          currentEdges
-        )
-        
-        reactFlowDataRef.current = reactFlowData
-        metadataRef.current = metadata
-        onSave(reactFlowData, metadata)
-        setValidationResult({
-          isValid: true,
-          message: 'Saved to canvas',
-        })
-        // Auto-dismiss after 5 seconds
-        setTimeout(() => {
-          setValidationResult({ isValid: null, message: '' })
-        }, 5000)
-        // Don't close editor - let user continue editing
-      } else {
-        // Save ReactFlow format
-        if (!parsed.nodes || !parsed.edges) {
+        // Try to translate - this will handle errors gracefully
+        try {
+          const { reactFlowData, metadata } = translateCustomToReactFlow(
+            parsed as CustomFlowJson,
+            currentNodes,
+            currentEdges
+          )
+          
+          reactFlowDataRef.current = reactFlowData
+          metadataRef.current = metadata
+          onSave(reactFlowData, metadata)
+          setValidationResult({
+            isValid: true,
+            message: 'Saved to canvas',
+          })
+          // Auto-dismiss after 5 seconds
+          setTimeout(() => {
+            setValidationResult({ isValid: null, message: '' })
+          }, 5000)
+        } catch (translateError) {
           setValidationResult({
             isValid: false,
-            message: 'Cannot save: Invalid ReactFlow JSON: missing nodes or edges',
+            message: `Cannot save: Translation error: ${translateError instanceof Error ? translateError.message : 'Unknown error'}`,
+          })
+          return
+        }
+        // Don't close editor - let user continue editing
+      } else {
+        // Save ReactFlow format - only check basic structure
+        if (!parsed.nodes || !Array.isArray(parsed.nodes)) {
+          setValidationResult({
+            isValid: false,
+            message: 'Cannot save: Missing or invalid nodes array',
+          })
+          return
+        }
+        
+        if (!parsed.edges || !Array.isArray(parsed.edges)) {
+          setValidationResult({
+            isValid: false,
+            message: 'Cannot save: Missing or invalid edges array',
           })
           return
         }
@@ -348,7 +380,7 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
     } catch (error) {
       setValidationResult({
         isValid: false,
-        message: `Cannot save: Invalid JSON: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        message: `Cannot save: Invalid JSON syntax: ${error instanceof Error ? error.message : 'Unknown error'}`,
       })
     }
   }
@@ -656,11 +688,6 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
                 if (highlight) {
                   const targetScrollTop = textarea.scrollTop
                   const targetScrollLeft = textarea.scrollLeft
-                  
-                  // Check if scroll heights match - if not, there's a rendering issue
-                  const textareaScrollHeight = textarea.scrollHeight
-                  const highlightScrollHeight = highlight.scrollHeight
-                  const scrollHeightMismatch = Math.abs(textareaScrollHeight - highlightScrollHeight)
                   
                   // Sync immediately - use scrollTo for more reliable syncing
                   highlight.scrollTo({

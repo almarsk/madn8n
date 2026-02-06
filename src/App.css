@@ -520,9 +520,9 @@
 
 .dynamic-node-label {
   color: rgba(226, 232, 240, 0.95);
-  font-size: 11px; /* Smaller font for labels */
+  font-size: 16px;
+  /* Increased font size for better readability */
   font-weight: 500;
-  text-align: center !important;
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
@@ -530,8 +530,9 @@
   -ms-user-select: none;
   pointer-events: all;
   display: flex;
-  align-items: center; /* Vertically center labels */
-  justify-content: center !important;
+  align-items: center;
+  /* Vertically center labels */
+  justify-content: flex-start;
   gap: 6px;
   width: 100%;
   min-width: 0;
@@ -560,7 +561,7 @@
   outline: 1px solid rgba(96, 165, 250, 0.5) !important;
   outline-offset: 1px;
   border-radius: 8px !important;
-  box-shadow: 
+  box-shadow:
     0 0 0 1px rgba(96, 165, 250, 0.15),
     0 2px 6px rgba(30, 64, 175, 0.2) !important;
 }
@@ -583,34 +584,35 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-  text-align: center;
+  justify-content: flex-start;
+  text-align: left;
   position: relative;
   /* Fade text at the right edge without introducing a background color */
   -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
 }
 
-/* When menu icon is present, keep labels centered but ensure text does not extend under the icon */
+/* When menu icon is present, keep text left-aligned and leave room for icon on the right */
 .dynamic-node-label:has(.dynamic-node-label-menu-opener) {
   position: relative;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .dynamic-node-label:has(.dynamic-node-label-menu-opener) .dynamic-node-label-text {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: calc(100% - 40px); /* Leave room for the menu opener on the right */
-  pointer-events: none; /* Allow clicks to pass through to menu icon */
-  z-index: 0;
+  position: relative;
+  transform: none;
+  width: calc(100% - 40px);
+  /* Leave room for the menu opener on the right */
+  margin-right: 8px;
 }
 
 .dynamic-node-label:has(.dynamic-node-label-menu-opener) .dynamic-node-label-menu-opener {
   position: relative;
   z-index: 1;
-  margin-left: auto; /* Push to the right */
-  flex-shrink: 0; /* Prevent shrinking */
+  margin-left: auto;
+  /* Push to the right */
+  flex-shrink: 0;
+  /* Prevent shrinking */
 }
 
 .dynamic-node-label-menu-opener {

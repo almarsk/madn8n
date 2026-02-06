@@ -2,20 +2,13 @@ import { useCallback } from 'react'
 import { type Node, type Edge } from 'reactflow'
 import nodeConfigs, { type NodeType, isBranchingOutputNodeType } from '../nodeConfigs'
 import modules from '../modules'
-import { parseType } from '../utils/nodeUtils'
+import { isEmpty, isParamObligatory } from '../utils/configHelpers'
 
 export interface ValidationStatus {
   isValid: boolean | null
   message: string
 }
 
-// Helper to check if a value is empty (null, undefined, empty string, empty array, empty object)
-const isEmpty = (value: any): boolean => {
-  if (value === null || value === undefined || value === '') return true
-  if (Array.isArray(value) && value.length === 0) return true
-  if (typeof value === 'object' && Object.keys(value).length === 0) return true
-  return false
-}
 
 export function useValidation(nodes: Node[], edges: Edge[]) {
   const validate = useCallback((): ValidationStatus => {
@@ -49,7 +42,7 @@ export function useValidation(nodes: Node[], edges: Edge[]) {
 
     // Check if all obligatory params are filled
     const nodesWithMissingParams: Array<{ node: Node; missingParams: string[] }> = []
-    
+
     nodes.forEach((node) => {
       const module = node.data?.moduleName ? modules.find((m) => m.name === node.data.moduleName) : undefined
       if (!module) return
@@ -58,9 +51,8 @@ export function useValidation(nodes: Node[], edges: Edge[]) {
       const missingParams: string[] = []
 
       module.params.forEach((param) => {
-        // Default to obligatory if not specified (backwards compatibility)
-        const isObligatory = param.obligatory !== false
-        
+        const isObligatory = isParamObligatory(param)
+
         if (isObligatory) {
           const paramValue = nodeParams[param.name]
           if (isEmpty(paramValue)) {
