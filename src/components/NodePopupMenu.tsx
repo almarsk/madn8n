@@ -37,6 +37,8 @@ interface NodePopupMenuProps {
   }
   // For sticker nodes, we need access to flowMetadata to show sticker dropdown
   stickers?: Record<string, any>
+  // Allow node menu to open the global sticker management menu
+  onOpenStickerMenu?: () => void
   onFlowMetadataUpdate?: (metadata: {
     description: string
     language: string
@@ -193,6 +195,7 @@ export default function NodePopupMenu({
   isFlowConfig = false,
   isStickerMenu = false,
   flowMetadata,
+  onOpenStickerMenu,
   onFlowMetadataUpdate,
   toolbarRef,
   title,
@@ -1562,56 +1565,8 @@ export default function NodePopupMenu({
           </div>
         )}
 
-        {/* Sticker Node Menu - Show dropdown for stickers */}
-        {!isFlowConfig && !isStickerMenu && nodeType === 'sticker' && module && module.name === 'StickerModule' && (
-          <div style={{ padding: '1rem' }}>
-            <div style={{ marginBottom: '0.75rem' }}>
-              <label style={{
-                display: 'block',
-                marginBottom: '0.375rem',
-                color: 'rgba(226, 232, 240, 0.9)',
-                fontSize: '0.875rem',
-                fontWeight: 500
-              }}>
-                Stickers
-                <span style={{ color: 'rgba(239, 68, 68, 0.8)', marginLeft: '0.25rem' }}>*</span>
-              </label>
-              <select
-                multiple
-                value={Array.isArray(params.stickers) ? params.stickers : []}
-                onChange={(e) => {
-                  const selected = Array.from(e.target.selectedOptions, option => option.value)
-                  handleParamChange('stickers', selected)
-                }}
-                style={{
-                  width: '100%',
-                  padding: '0.5rem 1.75rem 0.5rem 0.5rem',
-                  border: '1px solid rgba(148, 163, 184, 0.7)',
-                  borderRadius: '4px',
-                  background: 'rgba(15, 23, 42, 0.9)',
-                  color: '#e5e7eb',
-                  fontSize: '0.875rem',
-                  minHeight: '100px',
-                  appearance: 'none',
-                  WebkitAppearance: 'none',
-                  MozAppearance: 'none',
-                }}
-              >
-                {stickers && Object.entries(stickers).map(([id, sticker]: [string, any]) => (
-                  <option key={id} value={id}>
-                    {sticker.name || id}
-                  </option>
-                ))}
-              </select>
-              <p style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'rgba(148, 163, 184, 0.8)' }}>
-                Hold Ctrl/Cmd to select multiple stickers
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Single Node Menu - Show all params */}
-        {!isFlowConfig && nodeType && !isBranchingNodeType(nodeType) && !isBranchingOutputNodeType(nodeType) && nodeType !== 'sticker' && module && (
+        {/* Single Node Menu - Show all params (with special handling for sticker params) */}
+        {!isFlowConfig && nodeType && !isBranchingNodeType(nodeType) && !isBranchingOutputNodeType(nodeType) && module && (
           <div style={{ padding: '1rem' }}>
             {module.params.map((param) => {
               const defaultValue = getDefaultValue(param.type)
@@ -1623,6 +1578,95 @@ export default function NodePopupMenu({
                 (typeof currentValue === 'object' && !Array.isArray(currentValue) && Object.keys(currentValue).length === 0)
               const hasError = isObligatory && isEmpty
 
+              // Special UI for "sticker type" param:
+              // render a single-select dropdown bound to stickers defined in the toolbar menu.
+              // We key this off the param type/name so any module can expose a sticker selector.
+              if (
+                param.type === 'stickers' ||
+                param.name === 'stickers' ||
+                param.name === 'sticker_type' ||
+                param.name === 'stickerType'
+              ) {
+                const availableStickers =
+                  stickers ||
+                  flowMetadata?.stickers ||
+                  metadata.stickers ||
+                  {}
+
+                const selectedArray = Array.isArray(currentValue) ? currentValue : []
+                const selected = selectedArray[0] ?? ''
+
+                return (
+                  <div key={param.name} style={{ marginBottom: '0.75rem' }}>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '0.375rem',
+                      color: hasError ? 'rgba(239, 68, 68, 0.9)' : 'rgba(226, 232, 240, 0.9)',
+                      fontSize: '0.875rem',
+                      fontWeight: 500
+                    }}>
+                      Sticker type
+                      {isObligatory && <span style={{ color: 'rgba(239, 68, 68, 0.8)', marginLeft: '0.25rem' }}>*</span>}
+                    </label>
+                    <select
+                      value={selected}
+                      onChange={(e) => {
+                        const nextValue = e.target.value
+                        const arrayValue = nextValue ? [nextValue] : []
+                        // Store under the configured param name
+                        handleParamChange(param.name, arrayValue)
+                        // Also mirror to "stickers" key so label/color logic works even if the param
+                        // is named differently (e.g. "sticker_type") in module definitions.
+                        if (param.name !== 'stickers') {
+                          handleParamChange('stickers', arrayValue)
+                        }
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem 1.75rem 0.5rem 0.5rem',
+                        border: '1px solid rgba(148, 163, 184, 0.7)',
+                        borderRadius: '4px',
+                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                        color: '#e5e7eb',
+                        fontSize: '0.875rem',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none',
+                      }}
+                    >
+                      <option value="">Select sticker…</option>
+                      {Object.entries(availableStickers).map(([id, sticker]: [string, any]) => (
+                        <option key={id} value={id}>
+                          {(sticker as any).name || id}
+                        </option>
+                      ))}
+                    </select>
+                    {onOpenStickerMenu && (
+                      <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onOpenStickerMenu()
+                          }}
+                          style={{
+                            padding: '0.375rem 0.75rem',
+                            borderRadius: '4px',
+                            border: '1px solid rgba(148, 163, 184, 0.7)',
+                            background: 'rgba(30, 41, 59, 0.9)',
+                            color: '#e5e7eb',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Manage stickers…
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+
+              // Default rendering for all other params
               return (
                 <div key={param.name} style={{ marginBottom: '0.75rem' }}>
                   <label style={{

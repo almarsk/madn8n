@@ -440,8 +440,8 @@ export function translateReactFlowToCustom(
   const enrichedDialog: DialogConfig = {
     ...dialog,
     initial_user_response_timeout: dialogInitialTimeout,
-    // Stickers: keep empty for now as requested
-    stickers: {},
+    // Propagate collected stickers into the dialog so they are available in exported JSON
+    stickers: dialog.stickers,
   }
 
   const currentBotVersion: CurrentBotVersion = {

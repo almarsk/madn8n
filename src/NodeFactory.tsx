@@ -128,10 +128,50 @@ function NodeFactory({ data, id }: NodeProps<NodeFactoryData>) {
         }
     }
 
-    // Apply sticker color if available
-    const stickerColor = (data as any).stickerColor
+    // Helper to determine appropriate text color based on background brightness
+    const getTextColorForBackground = (bgColor: string | undefined): string | undefined => {
+        if (!bgColor || typeof bgColor !== 'string') return undefined
+
+        // Support hex colors in the form #RRGGBB or #RGB
+        let hex = bgColor.trim()
+        if (hex.startsWith('#')) {
+            hex = hex.slice(1)
+        }
+
+        if (hex.length === 3) {
+            // Expand #RGB to #RRGGBB
+            hex = hex.split('').map(ch => ch + ch).join('')
+        }
+
+        if (hex.length !== 6) {
+            return undefined
+        }
+
+        const r = parseInt(hex.slice(0, 2), 16)
+        const g = parseInt(hex.slice(2, 4), 16)
+        const b = parseInt(hex.slice(4, 6), 16)
+        if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+            return undefined
+        }
+
+        // Perceived brightness (relative luminance approximation)
+        const brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+
+        // For light backgrounds (brightness above threshold), use dark text for readability.
+        // Lower threshold slightly so text switches to dark on medium-light colors as well.
+        // Otherwise keep light text to contrast darker backgrounds.
+        return brightness > 0.5 ? '#020617' : '#e5e7eb'
+    }
+
+    // Apply sticker color if available and adjust text color for readability
+    const stickerColor = (data as any).stickerColor as string | undefined
+    const stickerTextColor = getTextColorForBackground(stickerColor)
     const nodeStyle = stickerColor
-        ? { cursor: cursorStyle, backgroundColor: stickerColor }
+        ? {
+            cursor: cursorStyle,
+            backgroundColor: stickerColor,
+            ...(stickerTextColor ? { color: stickerTextColor } : {}),
+        }
         : { cursor: cursorStyle }
 
     return (
@@ -143,8 +183,14 @@ function NodeFactory({ data, id }: NodeProps<NodeFactoryData>) {
         >
             <div
                 className={`dynamic-node-label ${isBranchingNodeType(nodeType) ? 'branching-node-header' : ''}`}
+                style={stickerTextColor ? { color: stickerTextColor } : undefined}
             >
-                <span className="dynamic-node-label-text">{data.label}</span>
+                <span
+                    className="dynamic-node-label-text"
+                    style={stickerTextColor ? { color: stickerTextColor } : undefined}
+                >
+                    {data.label}
+                </span>
                 {showMenu && (
                     <div
                         className="dynamic-node-label-menu-opener"

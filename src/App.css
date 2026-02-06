@@ -585,9 +585,13 @@
   align-items: center;
   justify-content: center;
   text-align: center;
+  position: relative;
+  /* Fade text at the right edge without introducing a background color */
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
 }
 
-/* When menu icon is present, ensure text is still centered by adjusting the label container */
+/* When menu icon is present, keep labels centered but ensure text does not extend under the icon */
 .dynamic-node-label:has(.dynamic-node-label-menu-opener) {
   position: relative;
   justify-content: space-between;
@@ -597,7 +601,7 @@
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  width: 100%;
+  width: calc(100% - 40px); /* Leave room for the menu opener on the right */
   pointer-events: none; /* Allow clicks to pass through to menu icon */
   z-index: 0;
 }

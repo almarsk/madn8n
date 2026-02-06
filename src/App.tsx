@@ -2201,18 +2201,20 @@ function App() {
       calculatedLabel = module.outputLabels[outputIndex] || calculatedLabel
     }
 
+    // For any node with a "stickers" param, add stickerColor based on the first selected sticker
+    const hasStickersParam = Array.isArray(node.data?.params?.stickers) && node.data.params.stickers.length > 0
+
     return {
       ...node,
       data: {
         ...node.data,
         label: calculatedLabel,
         onLabelClick: handleLabelClick,
-        // For sticker nodes, add sticker color to data
-        ...(nodeType === 'sticker' && node.data?.params?.sticker_id
+        ...(hasStickersParam
           ? {
             stickerColor: (() => {
-              const stickerId = node.data.params.sticker_id
-              const sticker = flowMetadata.stickers?.[stickerId]
+              const firstStickerId = node.data!.params!.stickers[0]
+              const sticker = flowMetadata.stickers?.[firstStickerId]
               return sticker?.appearance?.color || '#fceaea'
             })(),
           }
@@ -2396,6 +2398,9 @@ function App() {
               onDeleteNode={handleDeleteNode}
               initialPosition={menuPosition}
               onPositionChange={handleMenuPositionChange}
+              // Provide stickers so sticker nodes can render the sticker dropdown
+              stickers={flowMetadata.stickers}
+              onOpenStickerMenu={handleOpenStickerMenu}
             />
           )
         })()}

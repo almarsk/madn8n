@@ -31,7 +31,7 @@ export default function ValidationBanner({ isValid, message, onDismiss }: Valida
     // Set new timeout for 5 seconds
     timeoutRef.current = setTimeout(() => {
       handleDismiss()
-    }, 5000)
+    }, 1500)
   }, [handleDismiss])
 
   const pauseTimeout = useCallback(() => {
@@ -75,7 +75,7 @@ export default function ValidationBanner({ isValid, message, onDismiss }: Valida
   // Determine banner type: valid (success), invalid (error), or info (neutral/info messages)
   // For info messages, we use 'valid' styling but with info icon
   const bannerType = isValid === false ? 'invalid' : 'valid'
-  
+
   return (
     <div
       className={`validation-banner validation-banner--${bannerType} ${isVisible ? 'validation-banner--visible' : 'validation-banner--hidden'}`}

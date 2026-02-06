@@ -130,8 +130,8 @@ const defaultModules: Module[] = [
         "description": "Sticker node for visual organization",
         "params": [
             {
-                "name": "stickers",
-                "type": "list[str]",
+                "name": "sticker type",
+                "type": "stickers",
                 "obligatory": true
             }
         ],
