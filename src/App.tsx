@@ -7,7 +7,7 @@ import { useHistory } from './hooks/useHistory'
 import { createNodeFromConfig, createBranchingNodeWithOutputs } from './utils/nodeCreation'
 import { getNodeLabel, getId } from './utils/nodeUtils'
 import { useValidation } from './hooks/useValidation'
-import { getBranchingLayoutConstants, calculateOutputNodePosition, repositionOutputNodes, calculateBranchingNodeHeight, updateBranchingNodeHeight } from './utils/branchingNodeHelpers'
+import { getBranchingLayoutConstants, calculateOutputNodePosition, repositionOutputNodes, updateBranchingNodeHeight } from './utils/branchingNodeHelpers'
 import { exportFlowToJson } from './utils/exportHelpers'
 import { translateReactFlowToCustom, type CustomFlowMetadata } from './utils/translationHelpers'
 import { autoLayout } from './utils/layoutHelpers'
@@ -52,6 +52,12 @@ function App() {
   // Track when a branching node is being dragged so we can disable
   // smooth transitions for its output nodes (prevents them from lagging)
   const [isBranchingDragging, setIsBranchingDragging] = useState(false)
+
+  // Track whether any node is being dragged (for global edge/node layering)
+  const [isDragging, setIsDragging] = useState(false)
+
+  // Track which nodes are currently being dragged to give them highest z-index
+  const draggingNodeIdsRef = useRef<Set<string>>(new Set())
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
@@ -626,11 +632,11 @@ function App() {
           const viewportX = -flowX * zoom + targetScreenX
           const viewportY = -flowY * zoom + targetScreenY
 
-          instance.setViewport({ x: viewportX, y: viewportY, zoom, duration })
+          instance.setViewport({ x: viewportX, y: viewportY, zoom })
         }
       } else if (currentNodes.length === 0) {
         // Default zoom if no nodes
-        instance.setViewport({ x: 0, y: 0, zoom: 0.7, duration })
+        instance.setViewport({ x: 0, y: 0, zoom: 0.7 })
       } else {
         // Fit view with default zoom
         instance.fitView({ padding: 0.2, minZoom: 0.7, maxZoom: 1.5, duration })
@@ -655,7 +661,7 @@ function App() {
 
         // Set viewport immediately to prevent initial render hiccup
         // We'll position the start node at (0, 0) initially and adjust viewport
-        instance.setViewport({ x: targetScreenX, y: targetScreenY, zoom, duration: 0 })
+        instance.setViewport({ x: targetScreenX, y: targetScreenY, zoom })
 
         // Now create start node at flow position (0, 0) which will appear at target screen position
         setNodes((nds) => {
@@ -811,6 +817,20 @@ function App() {
           // Menus should only open via the menu icon (three dots) click
         }
       })
+
+      // Track which nodes are being dragged for z-index updates
+      const currentlyDragging = new Set<string>()
+      filteredChanges.forEach((change) => {
+        if (change.type === 'position' && change.dragging) {
+          currentlyDragging.add(change.id)
+        }
+      })
+
+      // Update dragging ref
+      draggingNodeIdsRef.current = currentlyDragging
+
+      // Update global dragging state (used for edge/node layering)
+      setIsDragging(currentlyDragging.size > 0)
 
       // Determine if any branching node is currently being dragged (for this batch)
       const hasBranchingDragging = filteredChanges.some((change) => {
@@ -1063,11 +1083,6 @@ function App() {
     setMenuPosition(null)
   }, [])
 
-  // Helper to show banner message (auto-dismisses after 5 seconds)
-  // Defined early so it can be used in handlers below
-  const showBannerMessage = useCallback((message: string, isValid: boolean | null = true) => {
-    setValidationStatus({ isValid, message })
-  }, [])
 
   const handleOpenFlowConfigMenu = useCallback(() => {
     // Close all other menus first
@@ -1528,6 +1543,9 @@ function App() {
   const handleUndo = useCallback(() => {
     if (!history.canUndo || isLocked) return
 
+    // Preserve current viewport to prevent view from moving
+    const currentViewport = reactFlowInstance?.getViewport()
+
     const previousState = history.undo()
     if (previousState) {
       isRestoringStateRef.current = true
@@ -1544,6 +1562,13 @@ function App() {
       // Update nodes and edges directly - useNodesState/useEdgesState will handle ReactFlow sync
       setNodes(cleanedNodes)
       setEdges(previousState.edges)
+
+      // Restore viewport to prevent view from moving
+      if (currentViewport && reactFlowInstance) {
+        requestAnimationFrame(() => {
+          reactFlowInstance.setViewport(currentViewport)
+        })
+      }
 
       // Clear ReactFlow's internal connection state to hide any visible handles
       // Use a small delay to ensure ReactFlow has processed the state update
@@ -1563,10 +1588,13 @@ function App() {
         })
       })
     }
-  }, [history, isLocked, setNodes, setEdges, onConnectEnd])
+  }, [history, isLocked, setNodes, setEdges, onConnectEnd, reactFlowInstance])
 
   const handleRedo = useCallback(() => {
     if (!history.canRedo || isLocked) return
+
+    // Preserve current viewport to prevent view from moving
+    const currentViewport = reactFlowInstance?.getViewport()
 
     const nextState = history.redo()
     if (nextState) {
@@ -1584,6 +1612,13 @@ function App() {
       // Update nodes and edges directly
       setNodes(cleanedNodes)
       setEdges(nextState.edges)
+
+      // Restore viewport to prevent view from moving
+      if (currentViewport && reactFlowInstance) {
+        requestAnimationFrame(() => {
+          reactFlowInstance.setViewport(currentViewport)
+        })
+      }
 
       // Clear ReactFlow's internal connection state to hide any visible handles
       // Use a small delay to ensure ReactFlow has processed the state update
@@ -1603,7 +1638,7 @@ function App() {
         })
       })
     }
-  }, [history, isLocked, setNodes, setEdges, onConnectEnd])
+  }, [history, isLocked, setNodes, setEdges, onConnectEnd, reactFlowInstance])
 
   // Duplicate selected nodes
   const handleDuplicateNodes = useCallback(() => {
@@ -1715,7 +1750,6 @@ function App() {
         const layoutConstants = getBranchingLayoutConstants()
         const newIndex = existingOutputNodes.length
         const branchingPos = parentNode.position || { x: 0, y: 0 }
-        const newOutputCount = newIndex + 1
 
         // Get the output node type from branching node config
         const branchingNodeType = parentNode.data?.nodeType as NodeType | undefined
@@ -1806,7 +1840,6 @@ function App() {
       // Create duplicated nodes
       const duplicatedNodes: Node[] = nodesToDuplicate.map((node) => {
         const newNodeId = idMap.get(node.id)!
-        const nodeType = node.data?.nodeType as NodeType | undefined
 
         // Update parentNodeId if this is an output node
         const newParentNodeId = node.data?.parentNodeId
@@ -1835,10 +1868,11 @@ function App() {
       }, highestZIndexRef.current)
       const baseZIndex = maxZIndex + 1
 
-      // Apply z-index to duplicated nodes
+      // Apply z-index to duplicated nodes and ensure selected is always boolean
       const duplicatedNodesWithZIndex = duplicatedNodes.map((node, idx) => ({
         ...node,
         zIndex: baseZIndex + idx,
+        selected: node.selected ?? false,
       }))
 
       // Deselect all existing nodes
@@ -1997,7 +2031,6 @@ function App() {
       })
 
       const layoutConstants = getBranchingLayoutConstants()
-      const { outputNodeWidth, padding, headerHeight, outputSpacing, outputNodeHeight, firstOutputExtraSpacing } = layoutConstants
       const newIndex = existingOutputNodes.length
       const branchingPos = branchingNode.position || { x: 0, y: 0 }
       const newOutputCount = newIndex + 1
@@ -2109,26 +2142,44 @@ function App() {
     highestZIndexRef.current = currentBandBase
   }
 
+  // Calculate highest z-index for dragged nodes
+  const maxZIndexForDragging = Math.max(
+    currentBandBase,
+    highestZIndexRef.current,
+    ...Array.from(branchingNodeZIndexes.values())
+  )
+  const draggingZIndex = maxZIndexForDragging + 1000 // Very high z-index for dragged nodes
+
   const nodesWithHandlers = nodes.map((node) => {
     const nodeType = (node.data?.nodeType || NODE_TYPES.SINGLE) as NodeType
     const config = nodeConfigs[nodeType]
     // Default zIndex for non-branching nodes: use existing or config default
     let zIndex = node.zIndex ?? config?.zIndex ?? 2
 
+    // If node is being dragged, give it highest z-index
+    if (draggingNodeIdsRef.current.has(node.id)) {
+      zIndex = draggingZIndex
+    }
     // For branching nodes, use the band z-index we computed above
-    if (isBranchingNodeType(nodeType)) {
+    else if (isBranchingNodeType(nodeType)) {
       const bandZ = branchingNodeZIndexes.get(node.id)
       if (bandZ !== undefined) {
         zIndex = bandZ
       }
     } else if (isBranchingOutputNodeType(nodeType) && node.data?.parentNodeId) {
       // Output nodes always sit just above their own parent, within the same band
-      const parentBandZ = branchingNodeZIndexes.get(node.data.parentNodeId)
-      if (parentBandZ !== undefined) {
+      const parentId = node.data.parentNodeId
+      const parentBandZ = branchingNodeZIndexes.get(parentId)
+      const isParentDragging = draggingNodeIdsRef.current.has(parentId)
+
+      if (isParentDragging) {
+        // If parent is being dragged, output node should be above parent (above draggingZIndex)
+        zIndex = draggingZIndex + 1
+      } else if (parentBandZ !== undefined) {
         zIndex = parentBandZ + 1
       } else {
         // Fallback if parent band not found: keep them slightly above their parent/config base
-        const parentNode = nodes.find((n) => n.id === node.data.parentNodeId)
+        const parentNode = nodes.find((n) => n.id === parentId)
         const parentConfig = parentNode?.data?.nodeType ? nodeConfigs[parentNode.data.nodeType as NodeType] : undefined
         const fallbackParentZ = parentNode?.zIndex ?? parentConfig?.zIndex ?? 10
         zIndex = fallbackParentZ + 1
@@ -2136,7 +2187,7 @@ function App() {
     }
 
     // Update highestZIndexRef to track the maximum z-index in use (for future node creations)
-    if (typeof zIndex === 'number' && zIndex > highestZIndexRef.current) {
+    if (typeof zIndex === 'number' && zIndex > highestZIndexRef.current && !draggingNodeIdsRef.current.has(node.id)) {
       highestZIndexRef.current = zIndex
     }
 
@@ -2196,7 +2247,7 @@ function App() {
   return (
     <div className="app-root">
       <main
-        className={`canvas-wrapper ${isBranchingDragging ? 'branching-drag-active' : ''}`}
+        className={`canvas-wrapper ${isBranchingDragging ? 'branching-drag-active' : ''} ${isDragging ? 'dragging-active' : ''}`}
         ref={reactFlowWrapper}
       >
         <Toolbar
@@ -2230,6 +2281,8 @@ function App() {
             if (!isLocked) {
               saveHistoryBeforeChange('other')
             }
+            // Disable animations during auto layout by adding a class
+            reactFlowWrapper.current?.classList.add('auto-layout-active')
             setNodes((current) => {
               const { nodes: laidOut, edges: updatedEdges } = autoLayout(current, edges)
 
@@ -2289,56 +2342,23 @@ function App() {
 
               return laidOut
             })
+            // Re-enable animations after layout completes
+            setTimeout(() => {
+              reactFlowWrapper.current?.classList.remove('auto-layout-active')
+            }, 100)
           }}
         />
 
         <FlowCanvas
           nodes={nodesWithHandlers}
           edges={edges.map((edge) => {
-            // Determine z-index based on source and target nodes
-            // Edges should be above branching nodes (zIndex 10) and output nodes (zIndex 11)
-            const sourceNode = nodes.find((n) => n.id === edge.source)
-            const targetNode = nodes.find((n) => n.id === edge.target)
-            const sourceNodeType = sourceNode?.data?.nodeType as NodeType | undefined
-            const targetNodeType = targetNode?.data?.nodeType as NodeType | undefined
-            let edgeZIndex = edge.zIndex ?? 2
-
-            // If source is an output node, edge must be above both the output node (11) and parent branching node (10)
-            if (sourceNode && sourceNodeType && isBranchingOutputNodeType(sourceNodeType)) {
-              // Edge needs to be above the output node, so use output node z-index + 1
-              edgeZIndex = (sourceNode.zIndex ?? 11) + 1
-              // Also check if there's a parent branching node and ensure we're above it
-              const parentNodeId = sourceNode.data?.parentNodeId as string | undefined
-              if (parentNodeId) {
-                const parentNode = nodes.find((n) => n.id === parentNodeId)
-                if (parentNode) {
-                  edgeZIndex = Math.max(edgeZIndex, (parentNode.zIndex ?? 10) + 1)
-                }
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'App.tsx:2310', message: 'Edge from output node z-index calculation', data: { edgeId: edge.id, sourceId: edge.source, parentNodeId, sourceNodeZIndex: sourceNode.zIndex, parentNodeZIndex: parentNode?.zIndex, calculatedEdgeZIndex: edgeZIndex }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
-                // #endregion
-              }
-            }
-            // If target is a branching node, ensure edge is above it
-            else if (targetNode && targetNodeType && isBranchingNodeType(targetNodeType)) {
-              edgeZIndex = Math.max(edgeZIndex, (targetNode.zIndex ?? 10) + 1)
-            }
-            // If source is a branching node, ensure edge is above it
-            else if (sourceNode && sourceNodeType && isBranchingNodeType(sourceNodeType)) {
-              edgeZIndex = Math.max(edgeZIndex, (sourceNode.zIndex ?? 10) + 1)
-            }
+            // Keep all edges below nodes so dragged nodes always visually sit on top
+            // Use a fixed low z-index for edges instead of matching the source node
+            const edgeZIndex = 1
 
             const edgeWithZIndex = {
               ...edge,
               zIndex: edgeZIndex,
-            }
-
-            // Set data attribute for CSS z-index control if needed
-            if (edgeZIndex > 10) {
-              (edgeWithZIndex as any).data = {
-                ...(edge.data || {}),
-                zIndex: edgeZIndex,
-              }
             }
 
             return edgeWithZIndex

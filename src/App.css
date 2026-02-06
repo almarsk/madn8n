@@ -378,14 +378,19 @@
   width: 220px;
   height: 160px;
   border-radius: 0.9rem;
-  border: 1px solid rgba(148, 163, 184, 0.6);
+  border: 2px solid rgba(96, 165, 250, 0.5);
   background: radial-gradient(circle at top, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.9));
   box-shadow:
     0 18px 40px rgba(15, 23, 42, 0.95),
-    0 0 0 1px rgba(15, 23, 42, 0.95);
+    0 0 0 1px rgba(15, 23, 42, 0.95),
+    0 0 10px rgba(96, 165, 250, 0.15),
+    inset 0 0 15px rgba(96, 165, 250, 0.05);
   overflow: hidden;
   z-index: 10;
   pointer-events: none;
+  /* Visual distinction: not part of canvas */
+  outline: 2px solid rgba(96, 165, 250, 0.2);
+  outline-offset: -2px;
 }
 
 .custom-minimap svg {
@@ -474,6 +479,11 @@
 /* Also disable transition while a branching node is being dragged,
    so outputs move in lockstep with their parent without lag */
 .canvas-wrapper.branching-drag-active .react-flow__node.branching-output-node-wrapper {
+  transition: none !important;
+}
+
+/* Disable transition during auto layout so nodes snap immediately */
+.canvas-wrapper.auto-layout-active .react-flow__node.branching-output-node-wrapper {
   transition: none !important;
 }
 
@@ -947,14 +957,19 @@
   pointer-events: all;
 }
 
-/* Ensure edges from output nodes appear above branching nodes */
-/* ReactFlow renders edges in SVG, so we need to ensure edges container is above nodes */
+/* Default: edges above nodes so connections (especially from branching outputs) are visible */
+/* ReactFlow renders edges in SVG, so we control stacking at the container level */
 .react-flow__edges {
   z-index: 12 !important;
 }
 
 .react-flow__nodes {
   z-index: 10 !important;
+}
+
+/* While dragging any node, temporarily place edges below nodes so dragged node appears on top */
+.canvas-wrapper.dragging-active .react-flow__edges {
+  z-index: 1 !important;
 }
 
 .react-flow__edge-path {

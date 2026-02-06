@@ -13,6 +13,7 @@ interface LayoutEdge {
   from: string
   to: string
   outputIndex?: number
+  sourceHandle?: string // e.g., 'bottom-source', 'left-source', 'right-source', 'top-source'
 }
 
 /**
@@ -87,7 +88,6 @@ export function autoLayout(
     const sourceNode = nodeById.get(edge.source)
     const targetNode = nodeById.get(edge.target)
     if (!sourceNode || !targetNode) continue
-
     if (sourceNode.data?.moduleName === 'Start') continue
 
     const sourceType = sourceNode.data?.nodeType as NodeType | undefined
@@ -122,6 +122,7 @@ export function autoLayout(
       from: fromId,
       to: toId,
       outputIndex,
+      sourceHandle: edge.sourceHandle || undefined, // Preserve source handle to respect connection direction
     })
 
     incomingCount.set(toId, (incomingCount.get(toId) ?? 0) + 1)
@@ -179,16 +180,19 @@ export function autoLayout(
   })
 
   // Sort nodes in each layer: nodes connected from branching outputs first, ordered by output index
+  // Also group nodes by their source node to maintain source relationships
   const sortedLevels = Array.from(layers.keys()).sort((a, b) => a - b)
   const sortedLayers = new Map<number, string[]>()
 
   for (const level of sortedLevels) {
     const layer = layers.get(level) || []
 
-    // Separate nodes into two groups:
+    // Separate nodes into groups:
     // 1. Nodes connected from branching outputs (ordered by output index)
-    // 2. Other nodes
+    // 2. Nodes grouped by their source node (to maintain source relationships)
+    // 3. Other nodes
     const fromBranching: Array<{ id: string; outputIndex: number }> = []
+    const bySource = new Map<string, string[]>() // sourceId -> target nodeIds
     const others: string[] = []
 
     for (const nodeId of layer) {
@@ -202,16 +206,38 @@ export function autoLayout(
           outputIndex: incomingFromBranching[0].outputIndex ?? 0
         })
       } else {
-        others.push(nodeId)
+        // Group by source node - this maintains source relationships
+        const incomingEdges = moduleEdges.filter(e => e.to === nodeId)
+        if (incomingEdges.length > 0) {
+          const sourceId = incomingEdges[0].from
+          if (!bySource.has(sourceId)) {
+            bySource.set(sourceId, [])
+          }
+          bySource.get(sourceId)!.push(nodeId)
+        } else {
+          others.push(nodeId)
+        }
       }
     }
 
     // Sort by output index
     fromBranching.sort((a, b) => a.outputIndex - b.outputIndex)
 
-    // Combine: branching-connected nodes first (by index), then others
+    // Sort source groups by source's level (earlier levels first) to maintain topological order
+    // Within same level, sort by source ID for stability
+    const sortedBySource = Array.from(bySource.entries()).sort((a, b) => {
+      const levelA = levelByModule.get(a[0]) ?? 999
+      const levelB = levelByModule.get(b[0]) ?? 999
+      if (levelA !== levelB) {
+        return levelA - levelB
+      }
+      return a[0].localeCompare(b[0])
+    })
+
+    // Combine: branching-connected nodes first (by index), then nodes grouped by source, then others
     sortedLayers.set(level, [
       ...fromBranching.map(n => n.id),
+      ...sortedBySource.flatMap(([_, nodeIds]) => nodeIds),
       ...others
     ])
   }
@@ -241,6 +267,15 @@ export function autoLayout(
     )
   }
 
+  // Build a map of incoming edges for each node to determine positioning relative to source
+  const incomingEdgesByNode = new Map<string, LayoutEdge[]>()
+  moduleEdges.forEach((edge) => {
+    if (!incomingEdgesByNode.has(edge.to)) {
+      incomingEdgesByNode.set(edge.to, [])
+    }
+    incomingEdgesByNode.get(edge.to)!.push(edge)
+  })
+
   for (const level of sortedLevels) {
     const layer = sortedLayers.get(level) || []
     const baseX = VIEWPORT_OFFSET_X + level * GRID_X_SPACING
@@ -251,9 +286,102 @@ export function autoLayout(
       if (!node) continue
 
       const nodeDims = getNodeDimensions(node)
+
+      // Determine initial position based on source handle direction
+      let candidateX = baseX
       let candidateY = VIEWPORT_OFFSET_Y + j * GRID_Y_SPACING
 
-      // Check for overlaps with previously positioned nodes in this layer
+      // Check incoming edges to respect source handle direction
+      const incomingEdges = incomingEdgesByNode.get(nodeId) || []
+      let handleBasedPositionApplied = false
+
+      if (incomingEdges.length > 0) {
+        // Use the first incoming edge's source handle to determine direction
+        const firstEdge = incomingEdges[0]
+        const sourcePos = positions.get(firstEdge.from)
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'layoutHelpers.ts:303', message: 'Checking incoming edges for handle-based positioning', data: { nodeId, incomingEdgeCount: incomingEdges.length, firstEdgeFrom: firstEdge.from, firstEdgeSourceHandle: firstEdge.sourceHandle, hasSourcePos: !!sourcePos }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H4' }) }).catch(() => { });
+        // #endregion
+
+        if (sourcePos) {
+          const sourceNode = nodeById.get(firstEdge.from)
+          const sourceDims = sourceNode ? getNodeDimensions(sourceNode) : { width: 220, height: 60 }
+          const sourceHandle = firstEdge.sourceHandle || 'bottom-source'
+
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'layoutHelpers.ts:312', message: 'Before handle-based positioning', data: { nodeId, sourceHandle, sourcePos, candidateX, candidateY, sourceDims, nodeDims }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H4' }) }).catch(() => { });
+          // #endregion
+
+          // Position target relative to source based on handle direction
+          // Final spec:
+          // - bottom handle  -> source node ABOVE target node -> target BELOW source
+          // - top handle     -> source node UNDER target node -> target ABOVE source
+          // - left handle    -> source node RIGHT of target   -> target LEFT of source
+          // - right handle   -> source node LEFT of target    -> target RIGHT of source
+
+          // Bottom handle: source node above target node -> target below source
+          if (sourceHandle.includes('bottom-source')) {
+            candidateY = sourcePos.y + sourceDims.height + GRID_Y_SPACING
+            candidateX = sourcePos.x
+            handleBasedPositionApplied = true
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'layoutHelpers.ts:316', message: 'Applied bottom-source positioning', data: { nodeId, candidateX, candidateY }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H4' }) }).catch(() => { });
+            // #endregion
+            // Top handle: source node under target node -> target above source
+          } else if (sourceHandle.includes('top-source')) {
+            candidateY = sourcePos.y - nodeDims.height - GRID_Y_SPACING
+            candidateX = sourcePos.x
+            handleBasedPositionApplied = true
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'layoutHelpers.ts:320', message: 'Applied top-source positioning', data: { nodeId, candidateX, candidateY }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H4' }) }).catch(() => { });
+            // #endregion
+            // Left handle: source node right of target node -> target left of source
+          } else if (sourceHandle.includes('left-source')) {
+            candidateX = sourcePos.x - nodeDims.width - GRID_X_SPACING
+            candidateY = sourcePos.y
+            handleBasedPositionApplied = true
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'layoutHelpers.ts:324', message: 'Applied left-source positioning', data: { nodeId, candidateX, candidateY }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H4' }) }).catch(() => { });
+            // #endregion
+            // Right handle: source node left of target node -> target right of source
+          } else if (sourceHandle.includes('right-source')) {
+            candidateX = sourcePos.x + sourceDims.width + GRID_X_SPACING
+            candidateY = sourcePos.y
+            handleBasedPositionApplied = true
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'layoutHelpers.ts:328', message: 'Applied right-source positioning', data: { nodeId, candidateX, candidateY }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H4' }) }).catch(() => { });
+            // #endregion
+          } else {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'layoutHelpers.ts:331', message: 'No matching handle - using default positioning', data: { nodeId, sourceHandle, candidateX, candidateY }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H4' }) }).catch(() => { });
+            // #endregion
+          }
+        }
+      }
+
+      // For nodes connected from branching outputs, arrange in parallel column
+      // BUT only if handle-based positioning was NOT applied (to preserve handle direction)
+      const fromBranchingEdges = incomingEdges.filter(e => e.outputIndex !== undefined)
+      if (fromBranchingEdges.length > 0 && !handleBasedPositionApplied) {
+        // Find the source node position
+        const sourceEdge = fromBranchingEdges[0]
+        const sourcePos = positions.get(sourceEdge.from)
+        if (sourcePos) {
+          const sourceNode = nodeById.get(sourceEdge.from)
+          const sourceDims = sourceNode ? getNodeDimensions(sourceNode) : { width: 220, height: 60 }
+          const outputIndex = sourceEdge.outputIndex ?? 0
+
+          // Arrange in parallel column to the right of source
+          candidateX = sourcePos.x + sourceDims.width + GRID_X_SPACING
+          candidateY = sourcePos.y + (outputIndex * GRID_Y_SPACING)
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'layoutHelpers.ts:379', message: 'Applied branching output positioning (no handle-based)', data: { nodeId, candidateX, candidateY, outputIndex }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H4' }) }).catch(() => { });
+          // #endregion
+        }
+      }
+
+      // Check for overlaps with previously positioned nodes
       let hasOverlap = true
       let attempts = 0
       const maxAttempts = 100
@@ -269,7 +397,7 @@ export function autoLayout(
           const existingDims = getNodeDimensions(existingNode)
 
           if (nodesOverlap(
-            { x: baseX, y: candidateY },
+            { x: candidateX, y: candidateY },
             nodeDims,
             existingPos,
             existingDims
@@ -284,7 +412,7 @@ export function autoLayout(
         attempts++
       }
 
-      positions.set(nodeId, { x: baseX, y: candidateY })
+      positions.set(nodeId, { x: candidateX, y: candidateY })
     }
   }
 

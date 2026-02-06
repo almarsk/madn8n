@@ -91,9 +91,6 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
         if (textareaRef.current && highlightRef.current) {
           highlightRef.current.scrollTop = textareaRef.current.scrollTop
           highlightRef.current.scrollLeft = textareaRef.current.scrollLeft
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'JsonEditor.tsx:88',message:'Initial scroll sync on search term change with RAF',data:{textareaScrollTop:textareaRef.current.scrollTop,highlightScrollTop:highlightRef.current.scrollTop,searchTerm},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-          // #endregion
         }
       })
     }
@@ -612,11 +609,6 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
                         const charBefore = offset > 0 ? escapedText[offset - 1] : ''
                         const isAfterNewline = charBefore === '\n'
                         
-                        // #region agent log
-                        if (matches.length > 0 && offset === matches[0].index) {
-                          fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'JsonEditor.tsx:515',message:'Span replacement for first match',data:{match,offset,charBefore,isAfterNewline,charCodeBefore:charBefore ? charBefore.charCodeAt(0) : -1},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-                        }
-                        // #endregion
                         
                         // Use inline with nowrap to prevent line break recalculation within the span
                         // This ensures the background only covers the actual text without affecting line flow
@@ -624,9 +616,6 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
                       }
                     )
                     
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'JsonEditor.tsx:471',message:'Search highlight range analysis',data:{searchTerm,originalLength:jsonText.length,escapedLength:escapedText.length,highlightedLength:highlighted.length,matchesCount:matches.length,firstMatch:matches[0]||null,allMatches:matches.slice(0,5)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-                    // #endregion
                     return highlighted
                   })(),
                 }}
@@ -680,9 +669,6 @@ export default function JsonEditor({ initialJson, initialReactFlowData, initialM
                     behavior: 'auto' // Instant, no smooth scrolling
                   })
                   
-                  // #region agent log
-                  fetch('http://127.0.0.1:7242/ingest/5a596e7f-1806-4a03-ac28-6bebb51402b8',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'JsonEditor.tsx:670',message:'Scroll sync with scrollTo',data:{textareaScrollTop:targetScrollTop,highlightScrollTop:highlight.scrollTop,textareaScrollLeft:targetScrollLeft,highlightScrollLeft:highlight.scrollLeft,textareaScrollHeight,highlightScrollHeight,scrollHeightMismatch,scrollDirection:targetScrollTop > (highlight.scrollTop || 0) ? 'down' : 'up',difference:Math.abs(targetScrollTop - highlight.scrollTop)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'K'})}).catch(()=>{});
-                  // #endregion
                   
                   // Double-check after requestAnimationFrame
                   requestAnimationFrame(() => {

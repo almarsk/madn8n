@@ -326,22 +326,22 @@ export default function NodePopupMenu({
       // Calculate maximum available size
       const maxAvailableWidth = viewportWidth - newPosition.x - horizontalMargin - margin
       const maxAvailableHeight = viewportHeight - newPosition.y - margin - margin
-      
+
       // Try to use desired size, but reduce if needed (down to minimum)
       const minWidth = 280
       const minHeight = 100
       const desiredWidth = menuSize.width || 360
       const desiredHeight = menuSize.height || 180
-      
+
       // Adjust size to fit viewport, but don't go below minimum
       const adjustedWidth = Math.max(minWidth, Math.min(desiredWidth, maxAvailableWidth))
       const adjustedHeight = Math.max(minHeight, Math.min(desiredHeight, maxAvailableHeight))
-      
+
       // Update menu size if it needs to be adjusted
       if (adjustedWidth !== menuSize.width || adjustedHeight !== menuSize.height) {
         setMenuSize({ width: adjustedWidth, height: adjustedHeight })
       }
-      
+
       const menuWidth = adjustedWidth
       const menuHeight = adjustedHeight
 
@@ -1735,48 +1735,48 @@ export default function NodePopupMenu({
 
         {/* Branching Output Node Menu - only show for listParam type, not internal */}
         {!isFlowConfig && nodeType && isBranchingOutputNodeType(nodeType) && node && module && module.outputConfig && module.outputConfig.type === 'listParam' && (
-            <div style={{ padding: '0.75rem' }}>
-              {(() => {
-                const listParamName = module.outputConfig.type === 'listParam' ? module.outputConfig.listParamName : undefined
-                const listParam = listParamName ? module.params.find(p => p.name === listParamName) : undefined
-                if (listParam) {
-                  // Output node value is always obligatory when linked to param
-                  const isObligatory = true
-                  const currentValue = params.value ?? ''
-                  const isEmpty = currentValue === null || currentValue === undefined || currentValue === ''
-                  const hasError = isObligatory && isEmpty
+          <div style={{ padding: '0.75rem' }}>
+            {(() => {
+              const listParamName = module.outputConfig.type === 'listParam' ? module.outputConfig.listParamName : undefined
+              const listParam = listParamName ? module.params.find(p => p.name === listParamName) : undefined
+              if (listParam) {
+                // Output node value is always obligatory when linked to param
+                const isObligatory = true
+                const currentValue = params.value ?? ''
+                const isEmpty = currentValue === null || currentValue === undefined || currentValue === ''
+                const hasError = isObligatory && isEmpty
 
-                  return (
-                    <div>
-                      <label style={{
-                        display: 'block',
-                        marginBottom: '0.375rem',
-                        color: hasError ? 'rgba(239, 68, 68, 0.9)' : 'rgba(226, 232, 240, 0.9)',
-                        fontSize: '0.875rem',
-                        fontWeight: 500
-                      }}>
-                        Value
-                        <span style={{ color: 'rgba(239, 68, 68, 0.8)', marginLeft: '0.25rem' }}>*</span>
-                        {(() => {
-                          // For output nodes, show only the element type, not "list[...]"
-                          const { inner } = parseType(listParam.type)
-                          const elementType = inner || 'str' // Show element type, fallback to str
-                          return elementType ? ` (${displayType(elementType)})` : ''
-                        })()}
-                      </label>
+                return (
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '0.375rem',
+                      color: hasError ? 'rgba(239, 68, 68, 0.9)' : 'rgba(226, 232, 240, 0.9)',
+                      fontSize: '0.875rem',
+                      fontWeight: 500
+                    }}>
+                      Value
+                      <span style={{ color: 'rgba(239, 68, 68, 0.8)', marginLeft: '0.25rem' }}>*</span>
                       {(() => {
-                        // Use the element type for the input
+                        // For output nodes, show only the element type, not "list[...]"
                         const { inner } = parseType(listParam.type)
-                        const inputType = inner || 'str'
-                        return renderParamInput(inputType, params.value ?? '', handleOutputValueChange)
+                        const elementType = inner || 'str' // Show element type, fallback to str
+                        return elementType ? ` (${displayType(elementType)})` : ''
                       })()}
-                    </div>
-                  )
-                }
-                return null
-              })()}
-            </div>
-          )}
+                    </label>
+                    {(() => {
+                      // Use the element type for the input
+                      const { inner } = parseType(listParam.type)
+                      const inputType = inner || 'str'
+                      return renderParamInput(inputType, params.value ?? '', handleOutputValueChange)
+                    })()}
+                  </div>
+                )
+              }
+              return null
+            })()}
+          </div>
+        )}
 
         {/* Fallback for nodes without module (only for node config, not flow config) */}
         {!isFlowConfig && !module && (
