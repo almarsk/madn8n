@@ -5,20 +5,31 @@ A node-based flow editor built with React, TypeScript, and ReactFlow. Create and
 ## TODO
 
 - testing
-    - manual testing
-        - small stuff
-            - simplify api for menu displaying - setToolbarMenu("stickers"|"mainConfig")
-            - flow canvas componetn should go
-            - handle label click is a rudiment
-            - simplify z index system - remove old related stuff
-            - remove debug logging to agent
-            - explicit edge deletion
-        - autolayout test
-        - history (undo/redo) works poorly with deletion
-    - run `yarn eslint . --fix; yarn tsc` and fix issues
-    - code review
-    - unit
-    - cypress
+  - manual testing
+    - small stuff
+      - simplify api for menu displaying - setToolbarMenu("stickers"|"mainConfig")
+        - menu buttons highlight
+      - flow canvas componetn should go
+      - handle label click is a rudiment
+      - simplify z index system - remove old related stuff
+        - latest clicked/added/dragged is highest
+        - move to top button in menu
+      - remove debug logging to agent
+      - explicit edge deletion
+      - json editor buttons
+        - validate only type check
+        - buttons same width
+      - default node labels ?
+    - autolayout test
+    - history (undo/redo) works poorly with deletion
+      - when reactflow changes it waits 1s and saves
+      - unless its a undo/redo
+    - edges more angular?
+    - x to delete node search bar
+  - run `yarn eslint . --fix; yarn tsc` and fix issues
+  - code review
+  - unit
+  - cypress
 
 ## Features
 

@@ -114,10 +114,10 @@ const defaultModules: Module[] = [
         "labelParam": undefined,
         "outputConfig": {
             "type": "internal",
-            "outputCount": 2
+            "outputCount": 3
         },
-        "outputLabels": ["Output 1", "Output 2"],
-        "handlers": ["on_0", "on_1"],
+        "outputLabels": ["Output 1", "Output 2", "outpu3"],
+        "handlers": ["on_0", "on_1", "on_3"],
         "source": {
             "path": "",
             "unpack_params": true
